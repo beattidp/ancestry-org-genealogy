@@ -98,12 +98,57 @@ class Database:
                     status TEXT DEFAULT 'running'
                 );
 
+                CREATE TABLE IF NOT EXISTS sources (
+                    id TEXT PRIMARY KEY,
+                    title TEXT,
+                    about_url TEXT,
+                    citation_text TEXT,
+                    collection_url TEXT,
+                    tier INTEGER DEFAULT 3,
+                    record_type TEXT DEFAULT 'other',
+                    raw_json TEXT,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE TABLE IF NOT EXISTS person_sources (
+                    id TEXT PRIMARY KEY,
+                    person_pid TEXT,
+                    source_id TEXT,
+                    tags TEXT,
+                    contributor TEXT,
+                    raw_json TEXT,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (person_pid) REFERENCES persons(pid) ON DELETE CASCADE,
+                    FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE CASCADE
+                );
+
+                CREATE TABLE IF NOT EXISTS person_audit_scores (
+                    person_pid TEXT PRIMARY KEY,
+                    total_sources INTEGER DEFAULT 0,
+                    tier1_sources INTEGER DEFAULT 0,
+                    tier2_sources INTEGER DEFAULT 0,
+                    tier3_sources INTEGER DEFAULT 0,
+                    birth_verified INTEGER DEFAULT 0,
+                    death_verified INTEGER DEFAULT 0,
+                    parentage_verified INTEGER DEFAULT 0,
+                    confidence_score REAL DEFAULT 0.0,
+                    confidence_level TEXT DEFAULT 'UNSOURCED',
+                    issues TEXT,
+                    audited_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (person_pid) REFERENCES persons(pid) ON DELETE CASCADE
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_facts_person ON facts(person_pid, fact_type);
                 CREATE INDEX IF NOT EXISTS idx_rel_parent ON relationships(parent_pid);
                 CREATE INDEX IF NOT EXISTS idx_rel_child ON relationships(child_pid);
                 CREATE INDEX IF NOT EXISTS idx_rel_spouses ON relationships(spouse1_pid, spouse2_pid);
                 CREATE INDEX IF NOT EXISTS idx_pedigree_root_gen ON pedigree_tree(root_pid, generation);
                 CREATE INDEX IF NOT EXISTS idx_pedigree_asc ON pedigree_tree(root_pid, ascendancy_number);
+                CREATE INDEX IF NOT EXISTS idx_sources_tier ON sources(tier);
+                CREATE INDEX IF NOT EXISTS idx_sources_type ON sources(record_type);
+                CREATE INDEX IF NOT EXISTS idx_ps_person ON person_sources(person_pid);
+                CREATE INDEX IF NOT EXISTS idx_ps_source ON person_sources(source_id);
+                CREATE INDEX IF NOT EXISTS idx_audit_conf ON person_audit_scores(confidence_score);
                 """
             )
 
@@ -433,3 +478,254 @@ class Database:
                     }
                 )
         return gaps
+
+    # -------------------------------------------------------------------------
+    # Sources & Audit Operations
+    # -------------------------------------------------------------------------
+
+    def upsert_source(self, source: dict[str, Any], conn: sqlite3.Connection | None = None) -> None:
+        """Upserts a source record into the sources table."""
+        sql = """
+        INSERT INTO sources (
+            id, title, about_url, citation_text, collection_url,
+            tier, record_type, raw_json, updated_at
+        ) VALUES (
+            :id, :title, :about_url, :citation_text, :collection_url,
+            :tier, :record_type, :raw_json, CURRENT_TIMESTAMP
+        )
+        ON CONFLICT(id) DO UPDATE SET
+            title = excluded.title,
+            about_url = excluded.about_url,
+            citation_text = excluded.citation_text,
+            collection_url = excluded.collection_url,
+            tier = excluded.tier,
+            record_type = excluded.record_type,
+            raw_json = excluded.raw_json,
+            updated_at = CURRENT_TIMESTAMP;
+        """
+        raw_json_str = (
+            json.dumps(source.get("raw_json", {}))
+            if isinstance(source.get("raw_json"), (dict, list))
+            else source.get("raw_json")
+        )
+        payload = {
+            "id": source["id"],
+            "title": _to_text(source.get("title")),
+            "about_url": _to_text(source.get("about_url")),
+            "citation_text": _to_text(source.get("citation_text")),
+            "collection_url": _to_text(source.get("collection_url")),
+            "tier": int(source.get("tier", 3)),
+            "record_type": _to_text(source.get("record_type", "other")),
+            "raw_json": raw_json_str,
+        }
+        if conn is not None:
+            conn.execute(sql, payload)
+        else:
+            with self.get_connection() as c:
+                c.execute(sql, payload)
+
+    def upsert_sources_batch(self, sources: Sequence[dict[str, Any]]) -> None:
+        """Batch upserts source records."""
+        with self.get_connection() as conn:
+            for s in sources:
+                self.upsert_source(s, conn=conn)
+
+    def upsert_person_sources_batch(self, person_sources: Sequence[dict[str, Any]]) -> None:
+        """Batch upserts citation reference links between persons and sources."""
+        sql = """
+        INSERT INTO person_sources (
+            id, person_pid, source_id, tags, contributor, raw_json, updated_at
+        ) VALUES (
+            :id, :person_pid, :source_id, :tags, :contributor, :raw_json, CURRENT_TIMESTAMP
+        )
+        ON CONFLICT(id) DO UPDATE SET
+            person_pid = excluded.person_pid,
+            source_id = excluded.source_id,
+            tags = excluded.tags,
+            contributor = excluded.contributor,
+            raw_json = excluded.raw_json,
+            updated_at = CURRENT_TIMESTAMP;
+        """
+        with self.get_connection() as conn:
+            for ps in person_sources:
+                raw_json_str = (
+                    json.dumps(ps.get("raw_json", {}))
+                    if isinstance(ps.get("raw_json"), (dict, list))
+                    else ps.get("raw_json")
+                )
+                payload = {
+                    "id": ps["id"],
+                    "person_pid": ps["person_pid"],
+                    "source_id": ps["source_id"],
+                    "tags": _to_text(ps.get("tags")),
+                    "contributor": _to_text(ps.get("contributor")),
+                    "raw_json": raw_json_str,
+                }
+                conn.execute(sql, payload)
+
+    def upsert_audit_score(self, score: dict[str, Any], conn: sqlite3.Connection | None = None) -> None:
+        """Upserts an audit assessment score for a person."""
+        sql = """
+        INSERT INTO person_audit_scores (
+            person_pid, total_sources, tier1_sources, tier2_sources, tier3_sources,
+            birth_verified, death_verified, parentage_verified,
+            confidence_score, confidence_level, issues, audited_at
+        ) VALUES (
+            :person_pid, :total_sources, :tier1_sources, :tier2_sources, :tier3_sources,
+            :birth_verified, :death_verified, :parentage_verified,
+            :confidence_score, :confidence_level, :issues, CURRENT_TIMESTAMP
+        )
+        ON CONFLICT(person_pid) DO UPDATE SET
+            total_sources = excluded.total_sources,
+            tier1_sources = excluded.tier1_sources,
+            tier2_sources = excluded.tier2_sources,
+            tier3_sources = excluded.tier3_sources,
+            birth_verified = excluded.birth_verified,
+            death_verified = excluded.death_verified,
+            parentage_verified = excluded.parentage_verified,
+            confidence_score = excluded.confidence_score,
+            confidence_level = excluded.confidence_level,
+            issues = excluded.issues,
+            audited_at = CURRENT_TIMESTAMP;
+        """
+        issues_str = (
+            json.dumps(score.get("issues", []))
+            if isinstance(score.get("issues"), (list, dict))
+            else score.get("issues")
+        )
+        payload = {
+            "person_pid": score["person_pid"],
+            "total_sources": int(score.get("total_sources", 0)),
+            "tier1_sources": int(score.get("tier1_sources", 0)),
+            "tier2_sources": int(score.get("tier2_sources", 0)),
+            "tier3_sources": int(score.get("tier3_sources", 0)),
+            "birth_verified": 1 if score.get("birth_verified") else 0,
+            "death_verified": 1 if score.get("death_verified") else 0,
+            "parentage_verified": 1 if score.get("parentage_verified") else 0,
+            "confidence_score": float(score.get("confidence_score", 0.0)),
+            "confidence_level": _to_text(score.get("confidence_level", "UNSOURCED")),
+            "issues": issues_str,
+        }
+        if conn is not None:
+            conn.execute(sql, payload)
+        else:
+            with self.get_connection() as c:
+                c.execute(sql, payload)
+
+    def get_person_sources(self, person_pid: str) -> list[dict[str, Any]]:
+        """Retrieves all attached sources and citation metadata for a person."""
+        sql = """
+        SELECT
+            ps.id AS citation_id,
+            ps.tags,
+            ps.contributor,
+            s.id AS source_id,
+            s.title,
+            s.about_url,
+            s.citation_text,
+            s.collection_url,
+            s.tier,
+            s.record_type
+        FROM person_sources ps
+        JOIN sources s ON ps.source_id = s.id
+        WHERE ps.person_pid = ?
+        ORDER BY s.tier ASC, s.record_type ASC;
+        """
+        with self.get_connection() as conn:
+            rows = conn.execute(sql, (person_pid,)).fetchall()
+            return [dict(r) for r in rows]
+
+    def get_audit_scores(self, root_pid: str) -> list[dict[str, Any]]:
+        """Retrieves audit scores for all ancestors in the pedigree of root_pid."""
+        sql = """
+        SELECT
+            pt.generation,
+            pt.ascendancy_number,
+            pt.lineage_path,
+            p.pid,
+            p.name,
+            p.gender,
+            p.lifespan,
+            COALESCE(sc.total_sources, 0) AS total_sources,
+            COALESCE(sc.tier1_sources, 0) AS tier1_sources,
+            COALESCE(sc.tier2_sources, 0) AS tier2_sources,
+            COALESCE(sc.tier3_sources, 0) AS tier3_sources,
+            COALESCE(sc.birth_verified, 0) AS birth_verified,
+            COALESCE(sc.death_verified, 0) AS death_verified,
+            COALESCE(sc.parentage_verified, 0) AS parentage_verified,
+            COALESCE(sc.confidence_score, 0.0) AS confidence_score,
+            COALESCE(sc.confidence_level, 'UNSOURCED') AS confidence_level,
+            sc.issues
+        FROM pedigree_tree pt
+        JOIN persons p ON pt.person_pid = p.pid
+        LEFT JOIN person_audit_scores sc ON p.pid = sc.person_pid
+        WHERE pt.root_pid = ?
+        ORDER BY pt.generation ASC, pt.ascendancy_number ASC;
+        """
+        with self.get_connection() as conn:
+            rows = conn.execute(sql, (root_pid,)).fetchall()
+            results = []
+            for r in rows:
+                d = dict(r)
+                if d.get("issues"):
+                    try:
+                        d["issues"] = json.loads(d["issues"])
+                    except Exception:
+                        pass
+                else:
+                    d["issues"] = []
+                results.append(d)
+            return results
+
+    def get_audit_summary(self, root_pid: str) -> dict[str, Any]:
+        """Calculates aggregate audit metrics across the pedigree."""
+        scores = self.get_audit_scores(root_pid)
+        total = len(scores)
+        if total == 0:
+            return {
+                "total_ancestors": 0,
+                "confidence_levels": {},
+                "generations": {},
+                "avg_confidence": 0.0,
+            }
+
+        conf_counts = {"HIGH": 0, "MEDIUM": 0, "LOW": 0, "UNSOURCED": 0}
+        gen_stats: dict[int, dict[str, Any]] = {}
+        total_score_sum = 0.0
+
+        for s in scores:
+            level = s["confidence_level"]
+            conf_counts[level] = conf_counts.get(level, 0) + 1
+            total_score_sum += s["confidence_score"]
+
+            gen = s["generation"]
+            if gen not in gen_stats:
+                gen_stats[gen] = {
+                    "count": 0,
+                    "birth_verified": 0,
+                    "death_verified": 0,
+                    "parentage_verified": 0,
+                    "avg_score": 0.0,
+                    "score_sum": 0.0,
+                }
+            g = gen_stats[gen]
+            g["count"] += 1
+            if s["birth_verified"]:
+                g["birth_verified"] += 1
+            if s["death_verified"]:
+                g["death_verified"] += 1
+            if s["parentage_verified"]:
+                g["parentage_verified"] += 1
+            g["score_sum"] += s["confidence_score"]
+
+        for gen, g in gen_stats.items():
+            g["avg_score"] = round(g["score_sum"] / g["count"], 1) if g["count"] > 0 else 0.0
+            del g["score_sum"]
+
+        return {
+            "root_pid": root_pid,
+            "total_ancestors": total,
+            "confidence_levels": conf_counts,
+            "generations": gen_stats,
+            "avg_confidence": round(total_score_sum / total, 1),
+        }
