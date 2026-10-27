@@ -138,6 +138,18 @@ class Database:
                     FOREIGN KEY (person_pid) REFERENCES persons(pid) ON DELETE CASCADE
                 );
 
+                CREATE TABLE IF NOT EXISTS constraint_violations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    rule_id TEXT NOT NULL,
+                    severity TEXT NOT NULL,
+                    person_pid TEXT NOT NULL,
+                    relative_pid TEXT,
+                    description TEXT NOT NULL,
+                    details_json TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (person_pid) REFERENCES persons(pid) ON DELETE CASCADE
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_facts_person ON facts(person_pid, fact_type);
                 CREATE INDEX IF NOT EXISTS idx_rel_parent ON relationships(parent_pid);
                 CREATE INDEX IF NOT EXISTS idx_rel_child ON relationships(child_pid);
@@ -149,6 +161,9 @@ class Database:
                 CREATE INDEX IF NOT EXISTS idx_ps_person ON person_sources(person_pid);
                 CREATE INDEX IF NOT EXISTS idx_ps_source ON person_sources(source_id);
                 CREATE INDEX IF NOT EXISTS idx_audit_conf ON person_audit_scores(confidence_score);
+                CREATE INDEX IF NOT EXISTS idx_violations_person ON constraint_violations(person_pid);
+                CREATE INDEX IF NOT EXISTS idx_violations_rule ON constraint_violations(rule_id);
+                CREATE INDEX IF NOT EXISTS idx_violations_severity ON constraint_violations(severity);
                 """
             )
 
@@ -729,3 +744,155 @@ class Database:
             "generations": gen_stats,
             "avg_confidence": round(total_score_sum / total, 1),
         }
+
+    # -------------------------------------------------------------------------
+    # Constraint & Biological Anomaly Operations
+    # -------------------------------------------------------------------------
+
+    def clear_violations(self, person_pid: str | None = None) -> int:
+        """Clears constraint violations from the database.
+
+        If person_pid is provided, only deletes violations for that person.
+        Otherwise deletes all violations.
+        """
+        with self.get_connection() as conn:
+            if person_pid:
+                cursor = conn.execute(
+                    "DELETE FROM constraint_violations WHERE person_pid = ?",
+                    (person_pid,),
+                )
+            else:
+                cursor = conn.execute("DELETE FROM constraint_violations")
+            return cursor.rowcount
+
+    def record_violations_batch(
+        self,
+        violations: list[dict[str, Any]],
+        clear_existing: bool = True,
+        person_pid: str | None = None,
+    ) -> int:
+        """Stores a batch of constraint violations into the database.
+
+        If clear_existing is True, clears existing violations beforehand.
+        """
+        with self.get_connection() as conn:
+            if clear_existing:
+                if person_pid:
+                    conn.execute(
+                        "DELETE FROM constraint_violations WHERE person_pid = ?",
+                        (person_pid,),
+                    )
+                else:
+                    conn.execute("DELETE FROM constraint_violations")
+
+            sql = """
+            INSERT INTO constraint_violations (
+                rule_id, severity, person_pid, relative_pid,
+                description, details_json, created_at
+            ) VALUES (
+                :rule_id, :severity, :person_pid, :relative_pid,
+                :description, :details_json, CURRENT_TIMESTAMP
+            )
+            """
+            for v in violations:
+                details_str = (
+                    json.dumps(v.get("details", {}))
+                    if isinstance(v.get("details"), (dict, list))
+                    else v.get("details")
+                )
+                payload = {
+                    "rule_id": v["rule_id"],
+                    "severity": v["severity"],
+                    "person_pid": v["person_pid"],
+                    "relative_pid": v.get("relative_pid"),
+                    "description": v["description"],
+                    "details_json": details_str,
+                }
+                conn.execute(sql, payload)
+
+            return len(violations)
+
+    def get_violations(
+        self,
+        root_pid: str | None = None,
+        person_pid: str | None = None,
+        severity: str | None = None,
+        min_confidence: float | None = None,
+    ) -> list[dict[str, Any]]:
+        """Retrieves constraint violations with person, relative, and pedigree metadata."""
+        query = """
+        SELECT
+            v.id,
+            v.rule_id,
+            v.severity,
+            v.person_pid,
+            p.name AS person_name,
+            p.lifespan AS person_lifespan,
+            v.relative_pid,
+            rel_p.name AS relative_name,
+            v.description,
+            v.details_json,
+            v.created_at,
+            pt.generation,
+            pt.ascendancy_number,
+            pt.lineage_path,
+            COALESCE(sc.confidence_score, 0.0) AS confidence_score,
+            COALESCE(sc.confidence_level, 'UNSOURCED') AS confidence_level
+        FROM constraint_violations v
+        JOIN persons p ON v.person_pid = p.pid
+        LEFT JOIN persons rel_p ON v.relative_pid = rel_p.pid
+        LEFT JOIN pedigree_tree pt ON (v.person_pid = pt.person_pid AND (? IS NULL OR pt.root_pid = ?))
+        LEFT JOIN person_audit_scores sc ON v.person_pid = sc.person_pid
+        WHERE 1=1
+        """
+        params: list[Any] = [root_pid, root_pid]
+
+        if person_pid:
+            query += " AND v.person_pid = ?"
+            params.append(person_pid)
+        if severity:
+            query += " AND v.severity = ?"
+            params.append(severity.upper())
+        if min_confidence is not None:
+            query += " AND COALESCE(sc.confidence_score, 0.0) >= ?"
+            params.append(min_confidence)
+
+        query += " ORDER BY pt.generation ASC, pt.ascendancy_number ASC, v.severity ASC, v.rule_id ASC"
+
+        with self.get_connection() as conn:
+            rows = conn.execute(query, params).fetchall()
+            results = []
+            for r in rows:
+                d = dict(r)
+                if d.get("details_json"):
+                    try:
+                        d["details"] = json.loads(d["details_json"])
+                    except Exception:
+                        d["details"] = {}
+                else:
+                    d["details"] = {}
+                results.append(d)
+            return results
+
+    def get_violations_summary(self, root_pid: str | None = None) -> dict[str, Any]:
+        """Calculates aggregate statistics for constraint violations."""
+        violations = self.get_violations(root_pid=root_pid)
+        total = len(violations)
+        severity_counts = {"ERROR": 0, "WARNING": 0, "INFO": 0}
+        rule_counts: dict[str, int] = {}
+        affected_persons = set()
+
+        for v in violations:
+            sev = v["severity"]
+            severity_counts[sev] = severity_counts.get(sev, 0) + 1
+            rule = v["rule_id"]
+            rule_counts[rule] = rule_counts.get(rule, 0) + 1
+            affected_persons.add(v["person_pid"])
+
+        return {
+            "total_violations": total,
+            "severity_counts": severity_counts,
+            "rule_counts": rule_counts,
+            "affected_person_count": len(affected_persons),
+        }
+
