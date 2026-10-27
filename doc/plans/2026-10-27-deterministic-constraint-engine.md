@@ -61,8 +61,9 @@ The engine applies rigorous rules across individual life events and parent-child
 
 #### [NEW] [src/constraints/engine.py](file:///home/beattidp/Documents/antigravity/ancestry-genealogy/src/constraints/engine.py)
 * `ConstraintEngine`: Coordinates graph traversal through SQLite:
-  * Loads all pedigree nodes, facts, and relationships.
-  * Evaluates every ancestor and relationship against all active rules.
+  * Supports arbitrary pedigree depth (no generation limits; validates all generations in DB).
+  * **Arbitrary Ancestor Targeting**: Can validate the entire tree, a specific ancestor and their direct relations, or an ancestral subtree rooted at any given PID (`root_pid` / `target_pid`).
+  * **Confidence & Validation Filter**: Optional filter (`min_confidence` or `validated_only`) to execute constraint checks specifically against ancestors that have already been corroborated by the Source Auditor.
   * Optionally saves results to `constraint_violations` table.
   * Produces an aggregate compliance summary.
 
@@ -70,11 +71,21 @@ The engine applies rigorous rules across individual life events and parent-child
 #### [NEW] [validate_tree.py](file:///home/beattidp/Documents/antigravity/ancestry-genealogy/validate_tree.py)
 * Rich CLI utility to run the engine on any SQLite database:
   ```bash
+  # Validate entire pedigree across all available generations
   python validate_tree.py --db data/pedigree.sqlite
+
+  # Validate starting from a specific validated ancestor (arbitrary depth/subtree)
+  python validate_tree.py --db data/pedigree.sqlite --root <ANCESTOR_PID>
+
+  # Validate only ancestors with confidence score >= 70% (GPS corroborated)
+  python validate_tree.py --db data/pedigree.sqlite --min-confidence 70
+
+  # Validate a single specific individual
+  python validate_tree.py --db data/pedigree.sqlite --pid <ANCESTOR_PID>
   ```
 * Displays:
   1. **Compliance Overview Panel**: Total nodes evaluated, total rules checked, pass rate, violations by severity.
-  2. **Violations Breakdown Table**: Ancestor PID, Name, Ahnentafel #, Rule ID, Severity, Deficit Description.
+  2. **Violations Breakdown Table**: Ancestor PID, Name, Ahnentafel #, Generation, Rule ID, Severity, Deficit Description.
   3. Optional `--persist` flag to record violations into SQLite.
 
 ### Automated Tests
