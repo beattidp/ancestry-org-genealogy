@@ -36,8 +36,14 @@ def main() -> int:
     parser.add_argument(
         "--generations",
         type=int,
-        default=4,
-        help="Number of ancestor generations to ingest (default: 4).",
+        default=7,
+        help="Number of base ancestor generations to ingest in single pass (default: 7).",
+    )
+    parser.add_argument(
+        "--recursive-to",
+        type=int,
+        default=10,
+        help="Target recursive depth to expand frontier leaf ancestors (default: 10, set 0 to disable).",
     )
     parser.add_argument(
         "--db",
@@ -47,6 +53,10 @@ def main() -> int:
     )
 
     args = parser.parse_args()
+
+    # Determine base and recursive targets
+    base_generations = min(args.generations, 7)
+    target_depth = max(args.generations, args.recursive_to) if args.recursive_to > 0 else args.generations
 
     console.print("\n[bold]FamilySearch Pedigree Ingestion Engine[/bold]\n")
 
@@ -73,7 +83,8 @@ def main() -> int:
     console.print(
         f"[cyan]Root Person PID:[/cyan] [bold green]{root_pid}[/bold green] "
         f"({auth_status.display_name or 'Current User'})\n"
-        f"[cyan]Max Generations:[/cyan] [bold]{args.generations}[/bold]\n"
+        f"[cyan]Base Generations (Pass 1):[/cyan] [bold]{base_generations}[/bold]\n"
+        f"[cyan]Recursive Frontier Target (Pass 2):[/cyan] [bold]{target_depth}[/bold]\n"
         f"[cyan]Target Database:[/cyan] [bold]{args.db}[/bold]\n"
     )
 
@@ -97,7 +108,8 @@ def main() -> int:
         try:
             result = ingester.ingest_ancestry(
                 root_pid=root_pid,
-                max_generations=args.generations,
+                max_generations=base_generations,
+                recursive_to=target_depth,
                 progress_callback=on_progress,
             )
             progress.update(task, description="[bold green]Ingestion complete!", completed=100)
@@ -123,6 +135,10 @@ def main() -> int:
         6: "4th Great-Grandparents",
         7: "5th Great-Grandparents",
         8: "6th Great-Grandparents",
+        9: "7th Great-Grandparents",
+        10: "8th Great-Grandparents",
+        11: "9th Great-Grandparents",
+        12: "10th Great-Grandparents",
     }
 
     stats = db.get_pedigree_stats(root_pid)

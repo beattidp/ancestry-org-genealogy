@@ -90,6 +90,10 @@ def main() -> int:
         6: "4th Great-Grandparents",
         7: "5th Great-Grandparents",
         8: "6th Great-Grandparents",
+        9: "7th Great-Grandparents",
+        10: "8th Great-Grandparents",
+        11: "9th Great-Grandparents",
+        12: "10th Great-Grandparents",
     }
 
     for gen, gen_data in sorted(stats["generations"].items()):
@@ -108,7 +112,8 @@ def main() -> int:
     console.print(table_stats)
 
     # Table 2: Identified Pedigree Gaps / Brick Walls
-    gaps = db.get_pedigree_gaps(root_pid, max_generation=5)
+    max_gap_gen = max(stats["generations"].keys()) if stats["generations"] else 5
+    gaps = db.get_pedigree_gaps(root_pid, max_generation=min(max_gap_gen, 7))
     if gaps:
         table_gaps = Table(
             title="Identified Pedigree Gaps (Target Lines for Primary Research)",

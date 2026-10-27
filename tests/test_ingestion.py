@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 from src.pedigree.extractor import (
     calculate_generation_and_path,
+    calculate_global_ahnentafel,
     derive_pedigree_parent_child_relationships,
     extract_facts,
     extract_person,
@@ -165,3 +166,30 @@ def test_pedigree_ingester():
         assert stats["total_ancestors"] == 3
         assert stats["generations"][0]["count"] == 1
         assert stats["generations"][1]["count"] == 2
+
+
+def test_calculate_global_ahnentafel():
+    # Frontier ancestor = Ahnentafel 16 (father.father.father.father)
+    gen, asc, path = calculate_global_ahnentafel(16, 1)
+    assert gen == 4
+    assert asc == 16
+    assert path == "father.father.father.father"
+
+    # Sub-ancestor 2 = father of Ahnentafel 16 (Ahnentafel 32, Gen 5)
+    gen, asc, path = calculate_global_ahnentafel(16, 2)
+    assert gen == 5
+    assert asc == 32
+    assert path == "father.father.father.father.father"
+
+    # Sub-ancestor 3 = mother of Ahnentafel 16 (Ahnentafel 33, Gen 5)
+    gen, asc, path = calculate_global_ahnentafel(16, 3)
+    assert gen == 5
+    assert asc == 33
+    assert path == "father.father.father.father.mother"
+
+    # Deep sub-ancestor: Gen 7 frontier (136), relative gen 3 (sub_asc = 8) -> Gen 10 (asc = 1088)
+    gen, asc, path = calculate_global_ahnentafel(136, 8)
+    assert gen == 10
+    assert asc == 1088
+    assert path.endswith(".father.father.father")
+

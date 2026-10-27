@@ -1,10 +1,10 @@
-"""Pedigree ingestion engine connecting FamilySearch API to SQLite database."""
-
+import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
 from src.familysearch.client import FamilySearchClient
 from src.pedigree.extractor import (
     calculate_generation_and_path,
+    calculate_global_ahnentafel,
     derive_pedigree_parent_child_relationships,
     extract_facts,
     extract_person,
@@ -37,17 +37,19 @@ class PedigreeIngester:
     def ingest_ancestry(
         self,
         root_pid: str,
-        max_generations: int = 4,
+        max_generations: int = 7,
+        recursive_to: int = 10,
         progress_callback: Callable[[str, int, int], None] | None = None,
     ) -> IngestionResult:
-        """Ingests multi-generational ancestry tree starting from root_pid."""
-        run_id = self.db.start_ingestion_run(root_pid, max_generations)
+        """Ingests multi-generational ancestry tree starting from root_pid with recursive frontier expansion."""
+        target_max_gen = max(max_generations, recursive_to) if recursive_to > 0 else max_generations
+        run_id = self.db.start_ingestion_run(root_pid, target_max_gen)
 
         try:
-            # Step 1: Initial query (FamilySearch API accepts up to 8 generations per call)
-            initial_fetch_depth = min(max_generations, 8)
+            # Step 1: Base Platform Ingestion (up to 7 generations in single call)
+            initial_fetch_depth = min(max_generations, 7)
             if progress_callback:
-                progress_callback(f"Querying FamilySearch for {initial_fetch_depth} generations...", 0, 100)
+                progress_callback(f"Querying FamilySearch for base {initial_fetch_depth} generations...", 0, 100)
 
             data = self.client.get_ancestry(
                 root_pid,
@@ -107,11 +109,10 @@ class PedigreeIngester:
                 self.db.replace_facts(pid, facts)
 
             # Step E: Save relationships
-            # 1. Explicit relationships from API (e.g. Couples with marriages)
             raw_rels = data.get("relationships", []) or data.get("childAndParentsRelationships", [])
             extracted_rels = extract_relationships(raw_rels)
 
-            # 2. Derive parent-child relationships from Ahnentafel numbers
+            # Derive parent-child relationships from Ahnentafel numbers
             asc_map = {asc: pid for _, pid, _, asc, _ in pedigree_nodes if asc is not None}
             derived_pc_rels = derive_pedigree_parent_child_relationships(asc_map)
 
@@ -120,69 +121,95 @@ class PedigreeIngester:
             self.db.upsert_relationships_batch(all_rels)
             extracted_rels = all_rels
 
-            # Step 2: Handle deep recursive ingestion if max_generations > 8
-            if max_generations > 8:
-                remaining_generations = max_generations - 8
-                # Find leaf ancestors at generation 8
+            # Step 2: Recursive Frontier Expansion (Generations 8 to 10)
+            if recursive_to > initial_fetch_depth:
+                # Find all frontier leaf ancestors at initial_fetch_depth
                 leaf_nodes = [
-                    (pid, asc) for _, pid, gen, asc, _ in pedigree_nodes if gen == 7 or gen == 8
+                    (pid, asc) for _, pid, gen, asc, _ in pedigree_nodes if gen == initial_fetch_depth and asc
                 ]
+                remaining_depth = min(recursive_to - initial_fetch_depth, 8)
 
-                for leaf_pid, leaf_asc in leaf_nodes:
-                    if not leaf_asc:
-                        continue
+                total_leaves = len(leaf_nodes)
+                for leaf_idx, (leaf_pid, leaf_asc) in enumerate(leaf_nodes):
+                    if progress_callback:
+                        progress_callback(
+                            f"Expanding frontier [{leaf_idx + 1}/{total_leaves}]: PID {leaf_pid}...",
+                            leaf_idx + 1,
+                            total_leaves,
+                        )
+
                     try:
                         sub_data = self.client.get_ancestry(
                             leaf_pid,
-                            generations=min(remaining_generations, 8),
+                            generations=remaining_depth,
                             person_details=True,
                             marriage_details=True,
                         )
                         sub_persons = sub_data.get("persons", [])
+                        sub_asc_map: dict[int, str] = {}
+
+                        sub_person_models = []
+                        sub_pedigree_nodes = []
+                        sub_facts_by_pid = {}
+
                         for sub_raw in sub_persons:
                             sub_pid = sub_raw.get("id")
-                            if not sub_pid or sub_pid in persons_map:
+                            if not sub_pid:
                                 continue
 
                             sub_person = extract_person(sub_raw)
-                            persons_map[sub_pid] = sub_person
-                            self.db.upsert_person(sub_person)
+                            if sub_pid not in persons_map:
+                                persons_map[sub_pid] = sub_person
+                                sub_person_models.append(sub_person)
 
                             sub_asc_raw = sub_raw.get("display", {}).get("ascendancyNumber")
                             if sub_asc_raw:
                                 try:
                                     sub_asc = int(str(sub_asc_raw).strip())
+                                    sub_asc_map[sub_asc] = sub_pid
                                     if sub_asc > 1:
-                                        # Compute global Ahnentafel
-                                        sub_gen, _ = calculate_generation_and_path(sub_asc)
-                                        global_asc = (leaf_asc << sub_gen) + (
-                                            sub_asc - (1 << sub_gen)
+                                        # Calculate global Ahnentafel, generation, and path
+                                        global_gen, global_asc, global_path = calculate_global_ahnentafel(
+                                            leaf_asc, sub_asc
                                         )
-                                        global_gen, global_path = calculate_generation_and_path(
-                                            global_asc
-                                        )
-                                        self.db.upsert_pedigree_node(
-                                            root_pid,
-                                            sub_pid,
-                                            global_gen,
-                                            global_asc,
-                                            global_path,
+                                        sub_pedigree_nodes.append(
+                                            (root_pid, sub_pid, global_gen, global_asc, global_path)
                                         )
                                 except ValueError:
                                     pass
 
                             sub_facts = extract_facts(sub_raw)
-                            self.db.replace_facts(sub_pid, sub_facts)
+                            sub_facts_by_pid[sub_pid] = sub_facts
                             facts_count += len(sub_facts)
 
-                        sub_rels = extract_relationships(
-                            sub_data.get("childAndParentsRelationships", [])
-                        )
-                        self.db.upsert_relationships_batch(sub_rels)
-                        extracted_rels.extend(sub_rels)
+                        # Insert sub-persons first
+                        if sub_person_models:
+                            self.db.upsert_persons_batch(sub_person_models)
 
-                    except Exception:
-                        # Continue with other branches if one deep leaf has no ancestry
+                        # Insert sub-pedigree nodes
+                        if sub_pedigree_nodes:
+                            with self.db.get_connection() as conn:
+                                for r_pid, p_pid, gen, asc, path in sub_pedigree_nodes:
+                                    self.db.upsert_pedigree_node(r_pid, p_pid, gen, asc, path, conn=conn)
+
+                        # Save sub-facts
+                        for sp_pid, s_facts in sub_facts_by_pid.items():
+                            self.db.replace_facts(sp_pid, s_facts)
+
+                        # Extract sub-relationships
+                        sub_couples = extract_relationships(sub_data.get("relationships", []))
+                        sub_derived_pc = derive_pedigree_parent_child_relationships(sub_asc_map)
+                        sub_all_rels = sub_couples + sub_derived_pc
+
+                        if sub_all_rels:
+                            self.db.upsert_relationships_batch(sub_all_rels)
+                            extracted_rels.extend(sub_all_rels)
+
+                        # Polite pacing
+                        time.sleep(0.05)
+
+                    except Exception as err:
+                        # Log error and continue with remaining leaves
                         continue
 
             # Calculate generation stats
@@ -200,7 +227,7 @@ class PedigreeIngester:
 
             return IngestionResult(
                 root_pid=root_pid,
-                max_generations=max_generations,
+                max_generations=target_max_gen,
                 total_persons=len(persons_map),
                 total_relationships=len(extracted_rels),
                 total_facts=facts_count,

@@ -298,3 +298,36 @@ def calculate_generation_and_path(ascendancy_number: int) -> tuple[int, str]:
             path_tokens.append("mother")
 
     return generation, ".".join(path_tokens)
+
+
+def calculate_global_ahnentafel(frontier_asc: int, sub_asc: int) -> tuple[int, int, str]:
+    """Calculates global generation, Ahnentafel number, and lineage path for a sub-pedigree node.
+
+    Args:
+        frontier_asc: Global Ahnentafel number of the root of the sub-pedigree (e.g. Gen 7 ancestor).
+        sub_asc: Relative Ahnentafel number within that sub-pedigree (1 = the frontier ancestor themselves).
+
+    Returns:
+        (global_generation, global_ascendancy_number, global_lineage_path)
+    """
+    if sub_asc <= 0 or frontier_asc <= 0:
+        return 0, 0, "unknown"
+
+    frontier_gen, frontier_path = calculate_generation_and_path(frontier_asc)
+    if sub_asc == 1:
+        return frontier_gen, frontier_asc, frontier_path
+
+    sub_gen, sub_path = calculate_generation_and_path(sub_asc)
+    global_gen = frontier_gen + sub_gen
+    global_asc = (frontier_asc << sub_gen) + (sub_asc - (1 << sub_gen))
+
+    # Path concatenation
+    if frontier_path == "self":
+        global_path = sub_path
+    elif sub_path == "self" or not sub_path:
+        global_path = frontier_path
+    else:
+        global_path = f"{frontier_path}.{sub_path}"
+
+    return global_gen, global_asc, global_path
+
