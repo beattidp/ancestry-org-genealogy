@@ -112,9 +112,19 @@ class FamilySearchClient:
         """Fetches full GEDCOM X payload for a tree person by PID (e.g. 'KW37-W3V')."""
         return self._request("GET", f"/platform/tree/persons/{pid}")
 
-    def get_ancestry(self, pid: str, generations: int = 4) -> dict[str, Any]:
+    def get_ancestry(
+        self,
+        pid: str,
+        generations: int = 4,
+        person_details: bool = True,
+        marriage_details: bool = True,
+    ) -> dict[str, Any]:
         """Retrieves multi-generational ancestry pedigree for an individual."""
-        params = {"person": pid, "generations": generations}
+        params: dict[str, Any] = {"person": pid, "generations": generations}
+        if person_details:
+            params["personDetails"] = "true"
+        if marriage_details:
+            params["marriageDetails"] = "true"
         return self._request("GET", "/platform/tree/ancestry", params=params)
 
     def get_person_parents(self, pid: str) -> dict[str, Any]:
