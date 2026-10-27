@@ -650,9 +650,21 @@ class Database:
             rows = conn.execute(sql, (person_pid,)).fetchall()
             return [dict(r) for r in rows]
 
-    def get_audit_scores(self, root_pid: str) -> list[dict[str, Any]]:
+    def has_person_sources(self, person_pid: str) -> bool:
+        """Checks if any sources are already linked to person_pid."""
+        sql = "SELECT 1 FROM person_sources WHERE person_pid = ? LIMIT 1;"
+        with self.get_connection() as conn:
+            return conn.execute(sql, (person_pid,)).fetchone() is not None
+
+    def get_audit_scores(self, root_pid: str, max_generation: int | None = None) -> list[dict[str, Any]]:
         """Retrieves audit scores for all ancestors in the pedigree of root_pid."""
-        sql = """
+        where_clause = "WHERE pt.root_pid = ?"
+        params: list[Any] = [root_pid]
+        if max_generation is not None:
+            where_clause += " AND pt.generation <= ?"
+            params.append(max_generation)
+
+        sql = f"""
         SELECT
             pt.generation,
             pt.ascendancy_number,
@@ -674,11 +686,11 @@ class Database:
         FROM pedigree_tree pt
         JOIN persons p ON pt.person_pid = p.pid
         LEFT JOIN person_audit_scores sc ON p.pid = sc.person_pid
-        WHERE pt.root_pid = ?
+        {where_clause}
         ORDER BY pt.generation ASC, pt.ascendancy_number ASC;
         """
         with self.get_connection() as conn:
-            rows = conn.execute(sql, (root_pid,)).fetchall()
+            rows = conn.execute(sql, params).fetchall()
             results = []
             for r in rows:
                 d = dict(r)
@@ -692,9 +704,9 @@ class Database:
                 results.append(d)
             return results
 
-    def get_audit_summary(self, root_pid: str) -> dict[str, Any]:
+    def get_audit_summary(self, root_pid: str, max_generation: int | None = None) -> dict[str, Any]:
         """Calculates aggregate audit metrics across the pedigree."""
-        scores = self.get_audit_scores(root_pid)
+        scores = self.get_audit_scores(root_pid, max_generation=max_generation)
         total = len(scores)
         if total == 0:
             return {

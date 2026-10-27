@@ -193,3 +193,57 @@ def test_calculate_global_ahnentafel():
     assert asc == 1088
     assert path.endswith(".father.father.father")
 
+    # Ultra-deep sub-ancestor: Gen 10 frontier (1024), relative gen 5 (sub_asc = 32) -> Gen 15 (asc = 32768)
+    gen, asc, path = calculate_global_ahnentafel(1024, 32)
+    assert gen == 15
+    assert asc == 32768
+
+
+def test_recursive_frontier_expansion():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "test_recursive.sqlite"
+        db = Database(db_path)
+
+        class MultiTierMockClient:
+            def get_ancestry(self, pid: str, generations: int = 1, **kwargs):
+                if pid == "ROOT":
+                    return {
+                        "persons": [
+                            {"id": "ROOT", "display": {"name": "Root", "ascendancyNumber": "1"}},
+                            {"id": "F1", "display": {"name": "Father", "ascendancyNumber": "2"}},
+                        ],
+                        "relationships": [],
+                    }
+                elif pid == "F1":
+                    return {
+                        "persons": [
+                            {"id": "F1", "display": {"name": "Father", "ascendancyNumber": "1"}},
+                            {"id": "GF2", "display": {"name": "Grandfather", "ascendancyNumber": "2"}},
+                        ],
+                        "relationships": [],
+                    }
+                elif pid == "GF2":
+                    return {
+                        "persons": [
+                            {"id": "GF2", "display": {"name": "Grandfather", "ascendancyNumber": "1"}},
+                            {"id": "GGF3", "display": {"name": "Great-Grandfather", "ascendancyNumber": "2"}},
+                        ],
+                        "relationships": [],
+                    }
+                return {"persons": [], "relationships": []}
+
+        client = MultiTierMockClient()
+        ingester = PedigreeIngester(client, db)
+
+        # Ingest base 1, recursive to 3
+        res = ingester.ingest_ancestry("ROOT", max_generations=1, recursive_to=3)
+        assert res.status == "completed"
+        stats = db.get_pedigree_stats("ROOT")
+        # Should have ROOT (gen 0), F1 (gen 1), GF2 (gen 2), GGF3 (gen 3)
+        assert stats["total_ancestors"] == 4
+        assert 0 in stats["generations"]
+        assert 1 in stats["generations"]
+        assert 2 in stats["generations"]
+        assert 3 in stats["generations"]
+
+

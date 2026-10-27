@@ -265,10 +265,15 @@ class SourceAuditor:
         self,
         root_pid: str,
         fetch: bool = False,
+        refresh: bool = False,
+        only_missing: bool = True,
+        max_generation: int | None = None,
         progress_callback: Callable[[str, int, int], None] | None = None,
     ) -> list[AuditAssessment]:
         """Audits all ancestors in the pedigree of root_pid."""
         pedigree = self.db.get_pedigree(root_pid)
+        if max_generation is not None:
+            pedigree = [p for p in pedigree if p.get("generation", 0) <= max_generation]
         total = len(pedigree)
 
         assessments = []
@@ -277,10 +282,16 @@ class SourceAuditor:
             name = person["name"]
 
             if fetch:
-                if progress_callback:
-                    progress_callback(f"Fetching sources for {name}", idx + 1, total)
-                self.fetch_and_store_person_sources(pid)
-                time.sleep(0.1)  # polite throttle for FamilySearch API
+                should_fetch = True
+                if only_missing and not refresh:
+                    if self.db.has_person_sources(pid):
+                        should_fetch = False
+
+                if should_fetch:
+                    if progress_callback:
+                        progress_callback(f"Fetching sources for {name}", idx + 1, total)
+                    self.fetch_and_store_person_sources(pid)
+                    time.sleep(0.08)  # polite throttle for FamilySearch API
 
             if progress_callback:
                 progress_callback(f"Auditing evidence for {name}", idx + 1, total)

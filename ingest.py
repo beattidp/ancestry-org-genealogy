@@ -139,6 +139,9 @@ def main() -> int:
         10: "8th Great-Grandparents",
         11: "9th Great-Grandparents",
         12: "10th Great-Grandparents",
+        13: "11th Great-Grandparents",
+        14: "12th Great-Grandparents",
+        15: "13th Great-Grandparents",
     }
 
     stats = db.get_pedigree_stats(root_pid)

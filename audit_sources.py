@@ -44,6 +44,17 @@ def main() -> int:
         action="store_true",
         help="Fetch latest attached sources from FamilySearch API before auditing.",
     )
+    parser.add_argument(
+        "--refresh",
+        action="store_true",
+        help="Force re-fetching sources from FamilySearch API even if already cached.",
+    )
+    parser.add_argument(
+        "--max-gen",
+        type=int,
+        default=None,
+        help="Maximum generation to audit (e.g. 7 or 10). If omitted, audits all available.",
+    )
 
     args = parser.parse_args()
     db_path = Path(args.db)
@@ -72,11 +83,17 @@ def main() -> int:
     root_person = db.get_person(root_pid)
     root_name = root_person["name"] if root_person else "Unknown"
 
+    fetch_mode_str = "[green]Live FamilySearch API Sync[/green]" if args.fetch else "[yellow]Offline Cached Data[/yellow]"
+    if args.refresh:
+        fetch_mode_str += " (Refresh All)"
+    max_gen_str = f"\n[bold]Max Generation:[/bold] {args.max_gen}" if args.max_gen is not None else ""
+
     console.print(
         Panel(
             f"[bold]Root Person:[/bold] {root_name} ([cyan]{root_pid}[/cyan])\n"
             f"[bold]Database:[/bold] [italic]{args.db}[/italic]\n"
-            f"[bold]Fetch Mode:[/bold] {'[green]Live FamilySearch API Sync[/green]' if args.fetch else '[yellow]Offline Cached Data[/yellow]'}",
+            f"[bold]Fetch Mode:[/bold] {fetch_mode_str}"
+            f"{max_gen_str}",
             title="[bold green]Genealogical Source & Citation Auditor[/bold green]",
             border_style="green",
         )
@@ -114,14 +131,20 @@ def main() -> int:
             progress.update(task, description=f"[cyan]{desc}", completed=pct)
 
         try:
-            auditor.audit_pedigree(root_pid, fetch=args.fetch, progress_callback=on_progress)
+            auditor.audit_pedigree(
+                root_pid,
+                fetch=args.fetch,
+                refresh=args.refresh,
+                max_generation=args.max_gen,
+                progress_callback=on_progress,
+            )
             progress.update(task, description="[bold green]Audit complete!", completed=100)
         except Exception as exc:
             console.print(f"\n[bold red]Audit Failed:[/bold red] {exc}")
             return 2
 
     # Render Table 1: Confidence Distribution
-    summary = db.get_audit_summary(root_pid)
+    summary = db.get_audit_summary(root_pid, max_generation=args.max_gen)
     total_ancestors = summary["total_ancestors"]
     conf_counts = summary["confidence_levels"]
 
@@ -163,6 +186,15 @@ def main() -> int:
         4: "2nd Great-Grandparents",
         5: "3rd Great-Grandparents",
         6: "4th Great-Grandparents",
+        7: "5th Great-Grandparents",
+        8: "6th Great-Grandparents",
+        9: "7th Great-Grandparents",
+        10: "8th Great-Grandparents",
+        11: "9th Great-Grandparents",
+        12: "10th Great-Grandparents",
+        13: "11th Great-Grandparents",
+        14: "12th Great-Grandparents",
+        15: "13th Great-Grandparents",
     }
 
     for gen, g_data in sorted(summary.get("generations", {}).items()):
@@ -183,7 +215,7 @@ def main() -> int:
     console.print(table_gen)
 
     # Render Table 3: Actionable Evidentiary Deficits (Backlog for Research)
-    scores = db.get_audit_scores(root_pid)
+    scores = db.get_audit_scores(root_pid, max_generation=args.max_gen)
     deficit_ancestors = [s for s in scores if s["confidence_level"] in ("LOW", "UNSOURCED") or not s["parentage_verified"]]
 
     if deficit_ancestors:

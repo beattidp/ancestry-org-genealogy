@@ -136,3 +136,50 @@ def test_source_auditor_unsourced():
         assert assessment.total_sources == 0
         assert assessment.confidence_level == "UNSOURCED"
         assert assessment.confidence_score == 0.0
+
+
+def test_audit_pedigree_incremental_and_scoping():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "test_audit_incremental.sqlite"
+        db = Database(db_path)
+
+        calls = []
+
+        class TrackingClient(MockFamilySearchClient):
+            def get_person_sources(self, pid: str):
+                calls.append(pid)
+                return super().get_person_sources(pid)
+
+        client = TrackingClient()
+        auditor = SourceAuditor(client, db)
+
+        # Setup pedigree: P0 (gen 0), P1 (gen 1), P2 (gen 2)
+        p0 = {"pid": "P0", "name": "Person 0", "gender": "Male"}
+        p1 = {"pid": "P1", "name": "Person 1", "gender": "Male"}
+        p2 = {"pid": "P2", "name": "Person 2", "gender": "Male"}
+        db.upsert_persons_batch([p0, p1, p2])
+        db.upsert_pedigree_node("P0", "P0", 0, 1, "self")
+        db.upsert_pedigree_node("P0", "P1", 1, 2, "father")
+        db.upsert_pedigree_node("P0", "P2", 2, 4, "father.father")
+
+        # Pre-seed sources for P0
+        db.upsert_sources_batch([{"id": "SRC_P0", "title": "Birth Cert", "tier": 1, "record_type": "vital_birth"}])
+        db.upsert_person_sources_batch([{"id": "ps_p0", "person_pid": "P0", "source_id": "SRC_P0"}])
+        assert db.has_person_sources("P0")
+        assert not db.has_person_sources("P1")
+
+        # Test max_generation=1 scoping: P2 should not be audited or fetched
+        assessments = auditor.audit_pedigree("P0", fetch=True, only_missing=True, refresh=False, max_generation=1)
+        assert len(assessments) == 2
+        pids = [a.person_pid for a in assessments]
+        assert "P0" in pids and "P1" in pids
+        assert "P2" not in pids
+
+        # P0 was already cached, so only P1 was fetched
+        assert "P0" not in calls
+        assert "P1" in calls
+
+        # Verify db.get_audit_summary respects max_generation
+        summary_gen1 = db.get_audit_summary("P0", max_generation=1)
+        assert summary_gen1["total_ancestors"] == 2
+        assert 2 not in summary_gen1["generations"]

@@ -121,96 +121,118 @@ class PedigreeIngester:
             self.db.upsert_relationships_batch(all_rels)
             extracted_rels = all_rels
 
-            # Step 2: Recursive Frontier Expansion (Generations 8 to 10)
-            if recursive_to > initial_fetch_depth:
-                # Find all frontier leaf ancestors at initial_fetch_depth
-                leaf_nodes = [
-                    (pid, asc) for _, pid, gen, asc, _ in pedigree_nodes if gen == initial_fetch_depth and asc
-                ]
-                remaining_depth = min(recursive_to - initial_fetch_depth, 8)
+            # Step 2: Recursive Frontier Expansion (up to target_max_gen)
+            if target_max_gen > initial_fetch_depth:
+                while True:
+                    curr_pedigree = self.db.get_pedigree(root_pid)
+                    if not curr_pedigree:
+                        break
 
-                total_leaves = len(leaf_nodes)
-                for leaf_idx, (leaf_pid, leaf_asc) in enumerate(leaf_nodes):
-                    if progress_callback:
-                        progress_callback(
-                            f"Expanding frontier [{leaf_idx + 1}/{total_leaves}]: PID {leaf_pid}...",
-                            leaf_idx + 1,
-                            total_leaves,
-                        )
+                    current_max_gen = max(p["generation"] for p in curr_pedigree)
+                    if current_max_gen < initial_fetch_depth or current_max_gen >= target_max_gen:
+                        break
 
-                    try:
-                        sub_data = self.client.get_ancestry(
-                            leaf_pid,
-                            generations=remaining_depth,
-                            person_details=True,
-                            marriage_details=True,
-                        )
-                        sub_persons = sub_data.get("persons", [])
-                        sub_asc_map: dict[int, str] = {}
+                    # Identify frontier leaf ancestors at current_max_gen
+                    leaf_nodes = [
+                        (p["pid"], p["ascendancy_number"])
+                        for p in curr_pedigree
+                        if p["generation"] == current_max_gen and p["ascendancy_number"]
+                    ]
 
-                        sub_person_models = []
-                        sub_pedigree_nodes = []
-                        sub_facts_by_pid = {}
+                    if not leaf_nodes:
+                        break
 
-                        for sub_raw in sub_persons:
-                            sub_pid = sub_raw.get("id")
-                            if not sub_pid:
+                    remaining_depth = min(target_max_gen - current_max_gen, 8)
+                    total_leaves = len(leaf_nodes)
+                    new_ancestors_found = 0
+
+                    for leaf_idx, (leaf_pid, leaf_asc) in enumerate(leaf_nodes):
+                        if progress_callback:
+                            progress_callback(
+                                f"Expanding Gen {current_max_gen} frontier [{leaf_idx + 1}/{total_leaves}]: PID {leaf_pid}...",
+                                leaf_idx + 1,
+                                total_leaves,
+                            )
+
+                        try:
+                            sub_data = self.client.get_ancestry(
+                                leaf_pid,
+                                generations=remaining_depth,
+                                person_details=True,
+                                marriage_details=True,
+                            )
+                            sub_persons = sub_data.get("persons", [])
+                            if not sub_persons:
                                 continue
 
-                            sub_person = extract_person(sub_raw)
-                            if sub_pid not in persons_map:
-                                persons_map[sub_pid] = sub_person
-                                sub_person_models.append(sub_person)
+                            sub_asc_map: dict[int, str] = {}
+                            sub_person_models = []
+                            sub_pedigree_nodes = []
+                            sub_facts_by_pid = {}
 
-                            sub_asc_raw = sub_raw.get("display", {}).get("ascendancyNumber")
-                            if sub_asc_raw:
-                                try:
-                                    sub_asc = int(str(sub_asc_raw).strip())
-                                    sub_asc_map[sub_asc] = sub_pid
-                                    if sub_asc > 1:
-                                        # Calculate global Ahnentafel, generation, and path
-                                        global_gen, global_asc, global_path = calculate_global_ahnentafel(
-                                            leaf_asc, sub_asc
-                                        )
-                                        sub_pedigree_nodes.append(
-                                            (root_pid, sub_pid, global_gen, global_asc, global_path)
-                                        )
-                                except ValueError:
-                                    pass
+                            for sub_raw in sub_persons:
+                                sub_pid = sub_raw.get("id")
+                                if not sub_pid:
+                                    continue
 
-                            sub_facts = extract_facts(sub_raw)
-                            sub_facts_by_pid[sub_pid] = sub_facts
-                            facts_count += len(sub_facts)
+                                sub_person = extract_person(sub_raw)
+                                if sub_pid not in persons_map:
+                                    persons_map[sub_pid] = sub_person
+                                    sub_person_models.append(sub_person)
 
-                        # Insert sub-persons first
-                        if sub_person_models:
-                            self.db.upsert_persons_batch(sub_person_models)
+                                sub_asc_raw = sub_raw.get("display", {}).get("ascendancyNumber")
+                                if sub_asc_raw:
+                                    try:
+                                        sub_asc = int(str(sub_asc_raw).strip())
+                                        sub_asc_map[sub_asc] = sub_pid
+                                        if sub_asc > 1:
+                                            # Calculate global Ahnentafel, generation, and path
+                                            global_gen, global_asc, global_path = calculate_global_ahnentafel(
+                                                leaf_asc, sub_asc
+                                            )
+                                            sub_pedigree_nodes.append(
+                                                (root_pid, sub_pid, global_gen, global_asc, global_path)
+                                            )
+                                            new_ancestors_found += 1
+                                    except ValueError:
+                                        pass
 
-                        # Insert sub-pedigree nodes
-                        if sub_pedigree_nodes:
-                            with self.db.get_connection() as conn:
-                                for r_pid, p_pid, gen, asc, path in sub_pedigree_nodes:
-                                    self.db.upsert_pedigree_node(r_pid, p_pid, gen, asc, path, conn=conn)
+                                sub_facts = extract_facts(sub_raw)
+                                sub_facts_by_pid[sub_pid] = sub_facts
+                                facts_count += len(sub_facts)
 
-                        # Save sub-facts
-                        for sp_pid, s_facts in sub_facts_by_pid.items():
-                            self.db.replace_facts(sp_pid, s_facts)
+                            # Insert sub-persons first
+                            if sub_person_models:
+                                self.db.upsert_persons_batch(sub_person_models)
 
-                        # Extract sub-relationships
-                        sub_couples = extract_relationships(sub_data.get("relationships", []))
-                        sub_derived_pc = derive_pedigree_parent_child_relationships(sub_asc_map)
-                        sub_all_rels = sub_couples + sub_derived_pc
+                            # Insert sub-pedigree nodes
+                            if sub_pedigree_nodes:
+                                with self.db.get_connection() as conn:
+                                    for r_pid, p_pid, gen, asc, path in sub_pedigree_nodes:
+                                        self.db.upsert_pedigree_node(r_pid, p_pid, gen, asc, path, conn=conn)
 
-                        if sub_all_rels:
-                            self.db.upsert_relationships_batch(sub_all_rels)
-                            extracted_rels.extend(sub_all_rels)
+                            # Save sub-facts
+                            for sp_pid, s_facts in sub_facts_by_pid.items():
+                                self.db.replace_facts(sp_pid, s_facts)
 
-                        # Polite pacing
-                        time.sleep(0.05)
+                            # Extract sub-relationships
+                            sub_couples = extract_relationships(sub_data.get("relationships", []))
+                            sub_derived_pc = derive_pedigree_parent_child_relationships(sub_asc_map)
+                            sub_all_rels = sub_couples + sub_derived_pc
 
-                    except Exception as err:
-                        # Log error and continue with remaining leaves
-                        continue
+                            if sub_all_rels:
+                                self.db.upsert_relationships_batch(sub_all_rels)
+                                extracted_rels.extend(sub_all_rels)
+
+                            # Polite pacing
+                            time.sleep(0.05)
+
+                        except Exception:
+                            # Log error and continue with remaining leaves
+                            continue
+
+                    if new_ancestors_found == 0:
+                        break
 
             # Calculate generation stats
             stats = self.db.get_pedigree_stats(root_pid)
@@ -218,9 +240,10 @@ class PedigreeIngester:
                 gen: data["count"] for gen, data in stats.get("generations", {}).items()
             }
 
+            total_ancestors_count = stats.get("total_ancestors", len(persons_map))
             self.db.finish_ingestion_run(
                 run_id=run_id,
-                persons_count=len(persons_map),
+                persons_count=total_ancestors_count,
                 rels_count=len(extracted_rels),
                 status="completed",
             )
@@ -228,7 +251,7 @@ class PedigreeIngester:
             return IngestionResult(
                 root_pid=root_pid,
                 max_generations=target_max_gen,
-                total_persons=len(persons_map),
+                total_persons=total_ancestors_count,
                 total_relationships=len(extracted_rels),
                 total_facts=facts_count,
                 generations_found=generations_found,
