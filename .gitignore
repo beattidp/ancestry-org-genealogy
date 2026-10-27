@@ -1,0 +1,21 @@
+# Environment and secrets
+.env
+credentials.json
+scratch/
+tmp/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local databases and caches
+*.sqlite
+*.sqlite3
+*.db
+data/
+cache/
