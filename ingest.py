@@ -31,7 +31,7 @@ def main() -> int:
         "--root",
         type=str,
         default="",
-        help="Root Person PID (e.g. KWHS-6NN). If omitted, detects root PID from session.",
+        help="Root Person PID (e.g. ABCD-123). If omitted, detects root PID from session.",
     )
     parser.add_argument(
         "--generations",

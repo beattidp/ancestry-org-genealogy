@@ -70,20 +70,20 @@ print("Authenticated User:", user["users"][0]["displayName"])
 ### Fetching Person & Ancestry
 ```python
 # Fetch root person profile
-person_data = client.get_person("KWHS-6NN")
+person_data = client.get_person("ABCD-123")
 name = person_data["persons"][0]["display"]["name"]
 
 # Fetch 4-generation pedigree tree
-ancestry_data = client.get_ancestry("KWHS-6NN", generations=4)
+ancestry_data = client.get_ancestry("ABCD-123", generations=4)
 ```
 
 ### Inspecting Sources & Matches
 ```python
 # Attached evidentiary sources
-sources = client.get_person_sources("KWHS-6NN")
+sources = client.get_person_sources("ABCD-123")
 
 # Algorithmic hints and duplicates
-matches = client.get_person_matches("KWHS-6NN", collection="records")
+matches = client.get_person_matches("ABCD-123", collection="records")
 ```
 
 ---
@@ -97,6 +97,6 @@ matches = client.get_person_matches("KWHS-6NN", collection="records")
 
 ### Live Production Probe
 * Tested against live FamilySearch API endpoint:
-  * User ID: `cis.user.MM9W-QYW8` (`Douglas Beattie Jr`)
-  * Root Person in Tree: `KWHS-6NN` (`Douglas Paul Beattie Jr (Male) - 1966-Living`)
+  * User ID: `cis.user.SAMPLE-USER` (`Sample User`)
+  * Root Person in Tree: `ABCD-123` (`Sample Ancestor (Male) - Deceased`)
   * Status: HTTP 200 OK.

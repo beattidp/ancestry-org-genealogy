@@ -71,7 +71,7 @@ ingester = PedigreeIngester(client, db)
 
 # Ingest 4 generations of ancestors
 result = ingester.ingest_ancestry(
-    root_pid="KWHS-6NN",
+    root_pid="ABCD-123",
     max_generations=4,
     progress_callback=lambda desc, curr, tot: print(f"{desc} ({curr}/{tot})")
 )
@@ -79,8 +79,8 @@ result = ingester.ingest_ancestry(
 print(f"Ingested {result.total_persons} ancestors and {result.total_relationships} relationships.")
 
 # Query offline stats
-stats = db.get_pedigree_stats("KWHS-6NN")
-gaps = db.get_pedigree_gaps("KWHS-6NN", max_generation=5)
+stats = db.get_pedigree_stats("ABCD-123")
+gaps = db.get_pedigree_gaps("ABCD-123", max_generation=5)
 ```
 
 ### CLI Ingestion Command
@@ -89,7 +89,7 @@ gaps = db.get_pedigree_gaps("KWHS-6NN", max_generation=5)
 python ingest.py --generations 4 --db data/pedigree.sqlite
 
 # Ingest custom root PID and custom depth
-python ingest.py --root KWHS-6NN --generations 6 --db data/pedigree.sqlite
+python ingest.py --root ABCD-123 --generations 6 --db data/pedigree.sqlite
 ```
 
 ### Offline Inspection Command
@@ -104,7 +104,7 @@ python tree_summary.py --db data/pedigree.sqlite
 
 * **Unit Test Suite:** 16 automated unit tests in `tests/test_storage.py`, `tests/test_ingestion.py`, `tests/test_auth.py`, and `tests/test_client.py`.
 * **Live Ingestion Verification:**
-  * Root PID: `KWHS-6NN` (Douglas Paul Beattie Jr)
+  * Root PID: `ABCD-123` (Sample User)
   * Generations Ingested: 4
   * Total Ancestors Persisted: 32
   * Total Relationships Persisted: 54
