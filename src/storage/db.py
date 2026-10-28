@@ -150,6 +150,25 @@ class Database:
                     FOREIGN KEY (person_pid) REFERENCES persons(pid) ON DELETE CASCADE
                 );
 
+                CREATE TABLE IF NOT EXISTS candidate_discoveries (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    person_pid TEXT NOT NULL,
+                    harvester TEXT NOT NULL,
+                    discovery_type TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    date_str TEXT,
+                    url TEXT,
+                    source_identifier TEXT,
+                    snippet_text TEXT,
+                    confidence_score REAL DEFAULT 0.0,
+                    relevance_reason TEXT,
+                    raw_json TEXT,
+                    status TEXT DEFAULT 'pending',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (person_pid) REFERENCES persons(pid) ON DELETE CASCADE
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_facts_person ON facts(person_pid, fact_type);
                 CREATE INDEX IF NOT EXISTS idx_rel_parent ON relationships(parent_pid);
                 CREATE INDEX IF NOT EXISTS idx_rel_child ON relationships(child_pid);
@@ -164,6 +183,9 @@ class Database:
                 CREATE INDEX IF NOT EXISTS idx_violations_person ON constraint_violations(person_pid);
                 CREATE INDEX IF NOT EXISTS idx_violations_rule ON constraint_violations(rule_id);
                 CREATE INDEX IF NOT EXISTS idx_violations_severity ON constraint_violations(severity);
+                CREATE INDEX IF NOT EXISTS idx_candidates_pid ON candidate_discoveries(person_pid);
+                CREATE INDEX IF NOT EXISTS idx_candidates_harvester ON candidate_discoveries(harvester);
+                CREATE INDEX IF NOT EXISTS idx_candidates_conf ON candidate_discoveries(confidence_score);
                 """
             )
 
@@ -931,4 +953,213 @@ class Database:
             "rule_counts": rule_counts,
             "affected_person_count": len(affected_persons),
         }
+
+    # -------------------------------------------------------------------------
+    # Candidate Discovery & External Harvesting Operations
+    # -------------------------------------------------------------------------
+
+    def upsert_candidate_discovery(
+        self, candidate: dict[str, Any], conn: sqlite3.Connection | None = None
+    ) -> int:
+        """Upserts a candidate discovery record, avoiding duplicate external records for a person."""
+        should_close = False
+        if conn is None:
+            conn = self.get_connection()
+            should_close = True
+
+        try:
+            person_pid = candidate["person_pid"]
+            harvester = candidate["harvester"]
+            url = candidate.get("url")
+            source_id = candidate.get("source_identifier")
+
+            # Check if this discovery already exists for this person and source
+            existing = None
+            if url:
+                existing = conn.execute(
+                    """
+                    SELECT id FROM candidate_discoveries
+                    WHERE person_pid = ? AND harvester = ? AND url = ?
+                    """,
+                    (person_pid, harvester, url),
+                ).fetchone()
+            elif source_id:
+                existing = conn.execute(
+                    """
+                    SELECT id FROM candidate_discoveries
+                    WHERE person_pid = ? AND harvester = ? AND source_identifier = ?
+                    """,
+                    (person_pid, harvester, source_id),
+                ).fetchone()
+
+            raw_json_str = _to_text(candidate.get("raw_json"))
+
+            if existing:
+                row_id = existing["id"]
+                conn.execute(
+                    """
+                    UPDATE candidate_discoveries
+                    SET title = ?, date_str = ?, snippet_text = ?,
+                        confidence_score = ?, relevance_reason = ?, raw_json = ?,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                    """,
+                    (
+                        candidate.get("title", ""),
+                        candidate.get("date_str"),
+                        candidate.get("snippet_text"),
+                        candidate.get("confidence_score", 0.0),
+                        candidate.get("relevance_reason"),
+                        raw_json_str,
+                        row_id,
+                    ),
+                )
+            else:
+                cursor = conn.execute(
+                    """
+                    INSERT INTO candidate_discoveries (
+                        person_pid, harvester, discovery_type, title,
+                        date_str, url, source_identifier, snippet_text,
+                        confidence_score, relevance_reason, raw_json, status
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        person_pid,
+                        harvester,
+                        candidate.get("discovery_type", "other"),
+                        candidate.get("title", ""),
+                        candidate.get("date_str"),
+                        url,
+                        source_id,
+                        candidate.get("snippet_text"),
+                        candidate.get("confidence_score", 0.0),
+                        candidate.get("relevance_reason"),
+                        raw_json_str,
+                        candidate.get("status", "pending"),
+                    ),
+                )
+                row_id = cursor.lastrowid
+
+            if should_close:
+                conn.commit()
+            return row_id
+        finally:
+            if should_close:
+                conn.close()
+
+    def get_candidate_discoveries(
+        self,
+        person_pid: str | None = None,
+        harvester: str | None = None,
+        min_confidence: float = 0.0,
+        status: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Retrieves candidate discoveries matching criteria, ordered by confidence score desc."""
+        query = """
+        SELECT cd.*, p.name AS person_name, p.lifespan AS person_lifespan,
+               pt.generation, pt.ascendancy_number
+        FROM candidate_discoveries cd
+        JOIN persons p ON cd.person_pid = p.pid
+        LEFT JOIN pedigree_tree pt ON cd.person_pid = pt.person_pid
+        WHERE cd.confidence_score >= ?
+        """
+        params: list[Any] = [min_confidence]
+
+        if person_pid:
+            query += " AND cd.person_pid = ?"
+            params.append(person_pid)
+        if harvester:
+            query += " AND cd.harvester = ?"
+            params.append(harvester)
+        if status:
+            query += " AND cd.status = ?"
+            params.append(status)
+
+        query += " ORDER BY cd.confidence_score DESC, cd.created_at DESC LIMIT ?"
+        params.append(limit)
+
+        with self.get_connection() as conn:
+            rows = conn.execute(query, params).fetchall()
+            results = []
+            for r in rows:
+                d = dict(r)
+                if d.get("raw_json"):
+                    try:
+                        d["raw_data"] = json.loads(d["raw_json"])
+                    except Exception:
+                        d["raw_data"] = {}
+                else:
+                    d["raw_data"] = {}
+                results.append(d)
+            return results
+
+    def get_terminal_brick_walls(
+        self, root_pid: str | None = None, max_generation: int = 10
+    ) -> list[dict[str, Any]]:
+        """Retrieves pedigree ancestors who have no recorded parents (terminal brick walls)."""
+        query = """
+        SELECT
+            pt.person_pid,
+            p.name,
+            p.gender,
+            p.lifespan,
+            p.birth_date,
+            p.birth_place,
+            p.death_date,
+            p.death_place,
+            pt.generation,
+            pt.ascendancy_number,
+            pt.lineage_path,
+            COALESCE(sc.confidence_score, 0.0) AS confidence_score,
+            COALESCE(sc.confidence_level, 'UNSOURCED') AS confidence_level,
+            COALESCE(sc.total_sources, 0) AS total_sources,
+            (SELECT COUNT(*) FROM candidate_discoveries cd WHERE cd.person_pid = pt.person_pid) AS candidate_count
+        FROM pedigree_tree pt
+        JOIN persons p ON pt.person_pid = p.pid
+        LEFT JOIN person_audit_scores sc ON pt.person_pid = sc.person_pid
+        WHERE (? IS NULL OR pt.root_pid = ?)
+          AND pt.generation <= ?
+          AND (SELECT COUNT(*) FROM relationships WHERE child_pid = pt.person_pid AND rel_type = 'parent-child') = 0
+        ORDER BY pt.generation ASC, pt.ascendancy_number ASC
+        """
+        with self.get_connection() as conn:
+            rows = conn.execute(query, (root_pid, root_pid, max_generation)).fetchall()
+            return [dict(r) for r in rows]
+
+    def get_discovery_summary(self) -> dict[str, Any]:
+        """Calculates aggregate metrics for candidate discoveries."""
+        with self.get_connection() as conn:
+            total = conn.execute("SELECT COUNT(*) FROM candidate_discoveries").fetchone()[0]
+            harvester_counts = dict(
+                conn.execute(
+                    "SELECT harvester, COUNT(*) FROM candidate_discoveries GROUP BY harvester"
+                ).fetchall()
+            )
+            type_counts = dict(
+                conn.execute(
+                    "SELECT discovery_type, COUNT(*) FROM candidate_discoveries GROUP BY discovery_type"
+                ).fetchall()
+            )
+            status_counts = dict(
+                conn.execute(
+                    "SELECT status, COUNT(*) FROM candidate_discoveries GROUP BY status"
+                ).fetchall()
+            )
+            avg_conf = conn.execute(
+                "SELECT COALESCE(AVG(confidence_score), 0.0) FROM candidate_discoveries"
+            ).fetchone()[0]
+            distinct_persons = conn.execute(
+                "SELECT COUNT(DISTINCT person_pid) FROM candidate_discoveries"
+            ).fetchone()[0]
+
+            return {
+                "total_discoveries": total,
+                "distinct_persons": distinct_persons,
+                "harvester_counts": harvester_counts,
+                "type_counts": type_counts,
+                "status_counts": status_counts,
+                "average_confidence": round(float(avg_conf), 3),
+            }
+
 
