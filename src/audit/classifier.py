@@ -24,18 +24,25 @@ class SourceClassifier:
         # Censuses
         (r"\b\d{4}\s+census\b", "census"),
         (r"\bcensus\b", "census"),
-        # Vital - Birth
+        # Vital - Birth & Baptism
         (r"\bbirth\s+index\b", "vital_birth"),
         (r"\bbirth\s+certificate\b", "vital_birth"),
         (r"\bbirths\s+and\s+christenings\b", "vital_birth"),
         (r"\bbaptism\b", "vital_birth"),
         (r"\bchristening\b", "vital_birth"),
+        (r"\bparish\s+registers?\b", "parish_register"),
+        (r"\bparish\s+records?\b", "parish_register"),
+        (r"\bchurch\s+records?\b", "parish_register"),
+        (r"\bkirk\s+session\b", "parish_register"),
         # Vital - Marriage
         (r"\bmarriage\s+index\b", "vital_marriage"),
         (r"\bmarriage\s+certificate\b", "vital_marriage"),
         (r"\bmarriages\b", "vital_marriage"),
-        (r"\bmarriage\s+records\b", "vital_marriage"),
+        (r"\bmarriage\s+records?\b", "vital_marriage"),
         (r"\bmarriage\s+license\b", "vital_marriage"),
+        (r"\bbanns\b", "vital_marriage"),
+        (r"\bmarriage\s+allegation\b", "vital_marriage"),
+        (r"\bmarriage\s+bond\b", "vital_marriage"),
         # Vital - Death & Cemetery
         (r"\bdeath\s+index\b", "vital_death"),
         (r"\bdeath\s+certificate\b", "vital_death"),
@@ -57,16 +64,43 @@ class SourceClassifier:
         (r"\bnumident\b", "social_security"),
         (r"\bsocial\s+security\b", "social_security"),
         (r"\bssdi\b", "social_security"),
-        # Probate & Legal
+        # Probate, Inquisitions & Legal Records
         (r"\bprobate\b", "probate"),
         (r"\bwill\s+and\s+probate\b", "probate"),
         (r"\bestate\s+files\b", "probate"),
         (r"\bdeed\b", "probate"),
         (r"\bland\s+grant\b", "probate"),
+        (r"\binquisition\s+post\s+mortem\b", "probate"),
+        (r"\bipm\b", "probate"),
+        (r"\bprerogative\s+court\b", "probate"),
+        (r"\btestament\s+dative\b", "probate"),
+        (r"\btestament\s+testamentar\b", "probate"),
+        (r"\bfeet\s+of\s+fines\b", "probate"),
+        (r"\bcourt\s+rolls?\b", "probate"),
+        (r"\bmanorial\b", "probate"),
+        (r"\bchancery\b", "probate"),
     ]
 
     # Patterns for Tier 2: Secondary / Derivative Evidence
     TIER2_PATTERNS = [
+        # Heralds' Visitations & Pedigrees
+        (r"\bvisitations?\s+of\b", "heraldic_visitation"),
+        (r"\bheraldic\s+visitation\b", "heraldic_visitation"),
+        (r"\bheraldic\b", "heraldic_visitation"),
+        (r"\bpedigrees\s+of\b", "heraldic_visitation"),
+        (r"\bvisitation\s+pedigree\b", "heraldic_visitation"),
+        # Peerages & Nobility Compilations
+        (r"\bpeerage\b", "peerage"),
+        (r"\bbaronetage\b", "peerage"),
+        (r"\bcokayne\b", "peerage"),
+        (r"\bburke'?s\b", "peerage"),
+        (r"\blanded\s+gentry\b", "peerage"),
+        # Academic & Scholarly Registers
+        (r"\balumni\s+cantabrigienses\b", "secondary"),
+        (r"\balumni\s+oxonienses\b", "secondary"),
+        (r"\bcounty\s+history\b", "secondary"),
+        (r"\bhistory\s+and\s+antiquities\b", "secondary"),
+        # Modern Secondary Compilations & Newspapers
         (r"\bobituary\b", "secondary"),
         (r"\bnewspaper\b", "secondary"),
         (r"\bpassenger\s+list\b", "secondary"),

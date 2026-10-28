@@ -39,15 +39,18 @@ Standard Git branching (e.g., branching `trunk` from `main` and committing file 
 ## Components
 
 ### 1. Script Entrypoint (`scripts/export_clean.py`)
-* **Whitelist-based synchronization:** Only approved directories and files are copied.
+* **Whitelist-based synchronization:** Only approved directories and files are copied (including all root CLI tools: `ingest.py`, `probe.py`, `validate_tree.py`, `tree_summary.py`, `audit_sources.py`, `export_gedcom.py`, `harvest_records.py`, `resolve_scottish_places.py`).
+* **Pre-Checkout Branch Management:** Ensures target branch (`trunk`) is checked out before altering any working tree files.
 * **In-memory content transformation:** Performs regex substitution on all source code and markdown documents prior to writing.
-* **Security Guard:** Scans destination files for forbidden user identifiers, surname patterns, and live PIDs.
-* **Git Automation:** Configures branch `trunk`, carries over safe GitHub noreply committer identity, and creates clean release commits.
+* **Security Guard (Step 4):** Scans destination files for forbidden user identifiers, surname patterns, and live PIDs.
+* **Destination Test Suite Validation (Step 4b):** Automatically executes `pytest` inside the target directory before staging any changes.
+* **Rollback Guard:** If the security scan or test suite fails, automatically restores the target repository via `git reset --hard HEAD` and `git clean -fd`, ensuring the destination git repository is never left dirty or indeterminate.
+* **Git Automation (Step 5):** Configures branch `trunk`, carries over safe GitHub noreply committer identity, and creates clean release commits.
 
 ### 2. Dummy Identifier Standards
 * **`ABCD-123`**: Chosen specifically as the dummy root PID because requests to FamilySearch for `ABCD-123` return `HTTP 404 Not Found`, ensuring no accidental correlation with live genealogical persons.
 * **`cis.user.SAMPLE-USER`**: Standard placeholder for account-level user tokens.
-* **`Sample User`**: Standard placeholder for developer/user display names.
+* **`Sample User` / `Sample Ancestor`**: Standard placeholders for developer/user display names and ancestor leads.
 
 ---
 
@@ -55,19 +58,19 @@ Standard Git branching (e.g., branching `trunk` from `main` and committing file 
 
 ### Run Default Export
 ```bash
-python scripts/export_clean.py
+python3 scripts/export_clean.py
 ```
 
 ### Run with Custom Target Directory or Branch
 ```bash
-python scripts/export_clean.py \
+python3 scripts/export_clean.py \
   --target-dir ~/github/beattidp/ancestry-org-genealogy \
   --branch trunk
 ```
 
 ### Dry Run (Stage files without committing)
 ```bash
-python scripts/export_clean.py --no-commit
+python3 scripts/export_clean.py --no-commit
 ```
 
 ### Push to GitHub
@@ -81,7 +84,8 @@ git push -u origin trunk
 
 ## Verification & Metrics
 
-* **Source Test Suite:** 37 passing unit tests in private repository (`pytest`).
-* **Exported Test Suite:** 37 passing unit tests in destination repository (`pytest`).
+* **Source Test Suite:** 54 passing unit tests in private repository (`pytest`).
+* **Exported Test Suite:** 54 passing unit tests in destination repository (`pytest`).
 * **Forbidden Pattern Scan:** 0 matches in target repository across all files.
 * **Branch Isolation:** Destination branch `trunk` has an independent, clean commit history.
+* **Indeterminate State Prevention:** Automatic rollback restores clean HEAD state on any abort.

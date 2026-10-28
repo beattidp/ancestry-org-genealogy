@@ -50,6 +50,12 @@ def main() -> int:
         help="Force re-fetching sources from FamilySearch API even if already cached.",
     )
     parser.add_argument(
+        "--min-gen",
+        type=int,
+        default=None,
+        help="Minimum generation to audit (e.g. 11). If omitted, starts from generation 0.",
+    )
+    parser.add_argument(
         "--max-gen",
         type=int,
         default=None,
@@ -86,14 +92,19 @@ def main() -> int:
     fetch_mode_str = "[green]Live FamilySearch API Sync[/green]" if args.fetch else "[yellow]Offline Cached Data[/yellow]"
     if args.refresh:
         fetch_mode_str += " (Refresh All)"
-    max_gen_str = f"\n[bold]Max Generation:[/bold] {args.max_gen}" if args.max_gen is not None else ""
+
+    gen_range_str = ""
+    if args.min_gen is not None or args.max_gen is not None:
+        min_lbl = f"Gen {args.min_gen}" if args.min_gen is not None else "Gen 0"
+        max_lbl = f"Gen {args.max_gen}" if args.max_gen is not None else "Max"
+        gen_range_str = f"\n[bold]Generational Range:[/bold] {min_lbl} to {max_lbl}"
 
     console.print(
         Panel(
             f"[bold]Root Person:[/bold] {root_name} ([cyan]{root_pid}[/cyan])\n"
             f"[bold]Database:[/bold] [italic]{args.db}[/italic]\n"
             f"[bold]Fetch Mode:[/bold] {fetch_mode_str}"
-            f"{max_gen_str}",
+            f"{gen_range_str}",
             title="[bold green]Genealogical Source & Citation Auditor[/bold green]",
             border_style="green",
         )
@@ -135,6 +146,7 @@ def main() -> int:
                 root_pid,
                 fetch=args.fetch,
                 refresh=args.refresh,
+                min_generation=args.min_gen,
                 max_generation=args.max_gen,
                 progress_callback=on_progress,
             )
@@ -144,7 +156,7 @@ def main() -> int:
             return 2
 
     # Render Table 1: Confidence Distribution
-    summary = db.get_audit_summary(root_pid, max_generation=args.max_gen)
+    summary = db.get_audit_summary(root_pid, min_generation=args.min_gen, max_generation=args.max_gen)
     total_ancestors = summary["total_ancestors"]
     conf_counts = summary["confidence_levels"]
 
@@ -215,7 +227,7 @@ def main() -> int:
     console.print(table_gen)
 
     # Render Table 3: Actionable Evidentiary Deficits (Backlog for Research)
-    scores = db.get_audit_scores(root_pid, max_generation=args.max_gen)
+    scores = db.get_audit_scores(root_pid, min_generation=args.min_gen, max_generation=args.max_gen)
     deficit_ancestors = [s for s in scores if s["confidence_level"] in ("LOW", "UNSOURCED") or not s["parentage_verified"]]
 
     if deficit_ancestors:
