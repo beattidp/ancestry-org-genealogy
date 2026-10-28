@@ -183,3 +183,62 @@ def test_audit_pedigree_incremental_and_scoping():
         summary_gen1 = db.get_audit_summary("P0", max_generation=1)
         assert summary_gen1["total_ancestors"] == 2
         assert 2 not in summary_gen1["generations"]
+
+
+def test_source_classifier_deep_historical_records():
+    # Heralds' Visitations
+    src_visitation = {"title": "The Visitation of the County of Worcester, 1569"}
+    tier, rtype = classify_source(src_visitation)
+    assert tier == 2
+    assert rtype == "heraldic_visitation"
+
+    # Parish Register
+    src_parish = {"title": "Parish Register of St Mary, Bury St Edmunds, 1538-1600"}
+    tier, rtype = classify_source(src_parish)
+    assert tier == 1
+    assert rtype == "parish_register"
+
+    # Inquisition Post Mortem
+    src_ipm = {"title": "Inquisition Post Mortem of Sir Thomas Neville, 1546"}
+    tier, rtype = classify_source(src_ipm)
+    assert tier == 1
+    assert rtype == "probate"
+
+    # Peerage Compilation
+    src_peerage = {"title": "The Complete Peerage of England, Scotland, Ireland"}
+    tier, rtype = classify_source(src_peerage)
+    assert tier == 2
+    assert rtype == "peerage"
+
+    # Alumni Register
+    src_alumni = {"title": "Alumni Oxonienses: The Members of the University of Oxford, 1500-1714"}
+    tier, rtype = classify_source(src_alumni)
+    assert tier == 2
+    assert rtype == "secondary"
+
+
+def test_audit_pedigree_min_generation_scoping():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "test_min_gen.sqlite"
+        db = Database(db_path)
+        client = MockFamilySearchClient()
+        auditor = SourceAuditor(client, db)
+
+        # Setup pedigree with Gen 0..3
+        for g in range(4):
+            pid = f"P{g}"
+            db.upsert_person({"pid": pid, "name": f"Person Gen {g}", "gender": "Male"})
+            db.upsert_pedigree_node("P0", pid, g, 2**g if g > 0 else 1, "lineage")
+
+        # Scope audit to Gen 2..3
+        assessments = auditor.audit_pedigree("P0", min_generation=2, max_generation=3)
+        assert len(assessments) == 2
+        pids = [a.person_pid for a in assessments]
+        assert "P2" in pids and "P3" in pids
+        assert "P0" not in pids and "P1" not in pids
+
+        # Summary scoped to Gen 2..3
+        summary = db.get_audit_summary("P0", min_generation=2, max_generation=3)
+        assert summary["total_ancestors"] == 2
+        assert set(summary["generations"].keys()) == {2, 3}
+

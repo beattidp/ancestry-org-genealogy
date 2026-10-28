@@ -656,10 +656,25 @@ class Database:
         with self.get_connection() as conn:
             return conn.execute(sql, (person_pid,)).fetchone() is not None
 
-    def get_audit_scores(self, root_pid: str, max_generation: int | None = None) -> list[dict[str, Any]]:
+    def get_audited_person_pids(self) -> set[str]:
+        """Returns set of all person PIDs that already have audit assessment scores recorded."""
+        sql = "SELECT person_pid FROM person_audit_scores;"
+        with self.get_connection() as conn:
+            rows = conn.execute(sql).fetchall()
+            return {r["person_pid"] for r in rows}
+
+    def get_audit_scores(
+        self,
+        root_pid: str,
+        min_generation: int | None = None,
+        max_generation: int | None = None,
+    ) -> list[dict[str, Any]]:
         """Retrieves audit scores for all ancestors in the pedigree of root_pid."""
         where_clause = "WHERE pt.root_pid = ?"
         params: list[Any] = [root_pid]
+        if min_generation is not None:
+            where_clause += " AND pt.generation >= ?"
+            params.append(min_generation)
         if max_generation is not None:
             where_clause += " AND pt.generation <= ?"
             params.append(max_generation)
@@ -704,9 +719,18 @@ class Database:
                 results.append(d)
             return results
 
-    def get_audit_summary(self, root_pid: str, max_generation: int | None = None) -> dict[str, Any]:
+    def get_audit_summary(
+        self,
+        root_pid: str,
+        min_generation: int | None = None,
+        max_generation: int | None = None,
+    ) -> dict[str, Any]:
         """Calculates aggregate audit metrics across the pedigree."""
-        scores = self.get_audit_scores(root_pid, max_generation=max_generation)
+        scores = self.get_audit_scores(
+            root_pid,
+            min_generation=min_generation,
+            max_generation=max_generation,
+        )
         total = len(scores)
         if total == 0:
             return {

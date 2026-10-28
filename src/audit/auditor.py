@@ -134,12 +134,12 @@ class SourceAuditor:
         parentage_verified = False
 
         # 1. Birth verification check
-        # Look for Tier 1 source with Birth in tags or vital_birth / social_security / census
+        # Look for Tier 1 source with Birth in tags or vital_birth / social_security / census / parish_register
         for s in sources:
             tags = (s.get("tags") or "").split(",")
             rtype = s.get("record_type", "")
             if s["tier"] == 1:
-                if "Birth" in tags or rtype in ("vital_birth", "social_security", "census"):
+                if "Birth" in tags or rtype in ("vital_birth", "social_security", "census", "parish_register"):
                     birth_verified = True
                     break
 
@@ -147,12 +147,12 @@ class SourceAuditor:
             issues.append("Missing Tier 1 primary birth or census record")
 
         # 2. Death verification check
-        # Look for Tier 1 source with Death in tags or vital_death / social_security
+        # Look for Tier 1 source with Death in tags or vital_death / social_security / probate
         for s in sources:
             tags = (s.get("tags") or "").split(",")
             rtype = s.get("record_type", "")
             if s["tier"] == 1:
-                if "Death" in tags or rtype in ("vital_death", "social_security"):
+                if "Death" in tags or rtype in ("vital_death", "social_security", "probate"):
                     death_verified = True
                     break
 
@@ -171,10 +171,10 @@ class SourceAuditor:
         if not has_parents:
             issues.append("Parentage unlinked in pedigree (brick wall)")
         else:
-            # Does a Tier 1 or Tier 2 documentary record corroborate family household (Census, birth register)?
+            # Does a Tier 1 or Tier 2 documentary record corroborate family household / lineage?
             for s in sources:
                 rtype = s.get("record_type", "")
-                if s["tier"] in (1, 2) and rtype in ("census", "vital_birth", "probate"):
+                if s["tier"] in (1, 2) and rtype in ("census", "vital_birth", "probate", "parish_register", "heraldic_visitation", "peerage"):
                     parentage_verified = True
                     break
 
@@ -267,14 +267,19 @@ class SourceAuditor:
         fetch: bool = False,
         refresh: bool = False,
         only_missing: bool = True,
+        min_generation: int | None = None,
         max_generation: int | None = None,
         progress_callback: Callable[[str, int, int], None] | None = None,
     ) -> list[AuditAssessment]:
         """Audits all ancestors in the pedigree of root_pid."""
         pedigree = self.db.get_pedigree(root_pid)
+        if min_generation is not None:
+            pedigree = [p for p in pedigree if p.get("generation", 0) >= min_generation]
         if max_generation is not None:
             pedigree = [p for p in pedigree if p.get("generation", 0) <= max_generation]
         total = len(pedigree)
+
+        already_audited = self.db.get_audited_person_pids()
 
         assessments = []
         for idx, person in enumerate(pedigree):
@@ -284,14 +289,14 @@ class SourceAuditor:
             if fetch:
                 should_fetch = True
                 if only_missing and not refresh:
-                    if self.db.has_person_sources(pid):
+                    if pid in already_audited or self.db.has_person_sources(pid):
                         should_fetch = False
 
                 if should_fetch:
                     if progress_callback:
                         progress_callback(f"Fetching sources for {name}", idx + 1, total)
                     self.fetch_and_store_person_sources(pid)
-                    time.sleep(0.08)  # polite throttle for FamilySearch API
+                    time.sleep(0.06)  # polite throttle for FamilySearch API
 
             if progress_callback:
                 progress_callback(f"Auditing evidence for {name}", idx + 1, total)
