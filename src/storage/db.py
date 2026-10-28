@@ -1162,4 +1162,100 @@ class Database:
                 "average_confidence": round(float(avg_conf), 3),
             }
 
+    def get_candidate_by_id(self, discovery_id: int) -> dict[str, Any] | None:
+        """Retrieves a single candidate discovery by primary key ID."""
+        with self.get_connection() as conn:
+            row = conn.execute(
+                """
+                SELECT cd.*, p.name AS person_name, p.lifespan AS person_lifespan
+                FROM candidate_discoveries cd
+                JOIN persons p ON cd.person_pid = p.pid
+                WHERE cd.id = ?
+                """,
+                (discovery_id,),
+            ).fetchone()
+            return dict(row) if row else None
+
+    def update_candidate_status(self, discovery_id: int, status: str) -> bool:
+        """Updates the review status ('pending', 'confirmed', 'rejected') of a candidate discovery."""
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE candidate_discoveries
+                SET status = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (status.lower(), discovery_id),
+            )
+            return cursor.rowcount > 0
+
+    def promote_candidate_to_source(self, discovery_id: int) -> tuple[str, str] | None:
+        """Promotes a candidate discovery to a verified source in sources and person_sources tables."""
+        candidate = self.get_candidate_by_id(discovery_id)
+        if not candidate:
+            return None
+
+        person_pid = candidate["person_pid"]
+        source_id = f"DISC_{discovery_id}"
+        person_source_id = f"PS_DISC_{discovery_id}"
+
+        # Assign tier
+        tier = 1 if candidate["discovery_type"] == "maritime_arrival" else 2
+
+        with self.get_connection() as conn:
+            # 1. Upsert into sources
+            conn.execute(
+                """
+                INSERT INTO sources (id, title, about_url, citation_text, tier, record_type, raw_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    title = excluded.title,
+                    about_url = excluded.about_url,
+                    citation_text = excluded.citation_text,
+                    tier = excluded.tier,
+                    record_type = excluded.record_type,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    source_id,
+                    candidate.get("title", ""),
+                    candidate.get("url"),
+                    f"Discovered via {candidate['harvester']} ({candidate['discovery_type']}): {candidate.get('snippet_text') or ''}",
+                    tier,
+                    candidate.get("discovery_type", "other"),
+                    candidate.get("raw_json"),
+                ),
+            )
+
+            # 2. Upsert into person_sources
+            conn.execute(
+                """
+                INSERT INTO person_sources (id, person_pid, source_id, tags, contributor)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    tags = excluded.tags,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    person_source_id,
+                    person_pid,
+                    source_id,
+                    "external_discovery,confirmed",
+                    candidate["harvester"],
+                ),
+            )
+
+            # 3. Update status in candidate_discoveries
+            conn.execute(
+                """
+                UPDATE candidate_discoveries
+                SET status = 'confirmed', updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (discovery_id,),
+            )
+
+            return source_id, person_source_id
+
+
 

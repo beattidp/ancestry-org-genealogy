@@ -269,3 +269,33 @@ def test_database_candidate_discoveries(temp_db: Database) -> None:
     assert summary["distinct_persons"] == 1
     assert summary["harvester_counts"] == {"chronicling_america": 1}
     assert summary["average_confidence"] == 0.9
+
+    # Test get_candidate_by_id
+    cand_row = temp_db.get_candidate_by_id(row_id)
+    assert cand_row is not None
+    assert cand_row["title"] == "Updated Steamer Arrival"
+    assert cand_row["status"] == "pending"
+
+    # Test update_candidate_status (reject)
+    ok_reject = temp_db.update_candidate_status(row_id, "rejected")
+    assert ok_reject is True
+    assert temp_db.get_candidate_by_id(row_id)["status"] == "rejected"
+
+    # Test promote_candidate_to_source
+    promo = temp_db.promote_candidate_to_source(row_id)
+    assert promo is not None
+    source_id, ps_id = promo
+    assert source_id == f"DISC_{row_id}"
+    assert ps_id == f"PS_DISC_{row_id}"
+    assert temp_db.get_candidate_by_id(row_id)["status"] == "confirmed"
+
+    # Verify source was created
+    with temp_db.get_connection() as conn:
+        s_row = conn.execute("SELECT * FROM sources WHERE id = ?", (source_id,)).fetchone()
+        assert s_row is not None
+        assert s_row["title"] == "Updated Steamer Arrival"
+        assert s_row["tier"] == 1  # maritime_arrival maps to tier 1
+        ps_row = conn.execute("SELECT * FROM person_sources WHERE id = ?", (ps_id,)).fetchone()
+        assert ps_row is not None
+        assert ps_row["person_pid"] == "P-101"
+

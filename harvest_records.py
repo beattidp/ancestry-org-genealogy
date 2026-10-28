@@ -107,6 +107,29 @@ def main() -> None:
         help="Display current candidate discovery summary in database and exit.",
     )
     parser.add_argument(
+        "--list-candidates",
+        action="store_true",
+        help="List candidate discoveries from the database and exit.",
+    )
+    parser.add_argument(
+        "--status",
+        choices=["all", "pending", "confirmed", "rejected"],
+        default="pending",
+        help="Filter status for --list-candidates (default: pending).",
+    )
+    parser.add_argument(
+        "--confirm",
+        type=int,
+        metavar="ID",
+        help="Confirm candidate discovery ID and promote it to a verified source in SQLite.",
+    )
+    parser.add_argument(
+        "--reject",
+        type=int,
+        metavar="ID",
+        help="Reject candidate discovery ID (mark as rejected).",
+    )
+    parser.add_argument(
         "--db-path",
         type=str,
         default="data/pedigree.sqlite",
@@ -116,6 +139,40 @@ def main() -> None:
     args = parser.parse_args()
     db = Database(args.db_path)
 
+    # 1. Handle Confirm
+    if args.confirm is not None:
+        cand = db.get_candidate_by_id(args.confirm)
+        if not cand:
+            print(f"Error: Candidate discovery ID {args.confirm} not found.", file=sys.stderr)
+            sys.exit(1)
+        res = db.promote_candidate_to_source(args.confirm)
+        if res:
+            source_id, person_source_id = res
+            print("\n[SUCCESS] Confirmed and promoted candidate discovery:")
+            print(f"  ID:          {args.confirm}")
+            print(f"  Person:      {cand.get('person_name')} ({cand['person_pid']})")
+            print(f"  Title:       {cand['title']}")
+            print(f"  Source ID:   {source_id}")
+            print(f"  Link ID:     {person_source_id}")
+            print(f"  Status:      CONFIRMED\n")
+        else:
+            print(f"Failed to promote candidate ID {args.confirm}.", file=sys.stderr)
+        sys.exit(0)
+
+    # 2. Handle Reject
+    if args.reject is not None:
+        cand = db.get_candidate_by_id(args.reject)
+        if not cand:
+            print(f"Error: Candidate discovery ID {args.reject} not found.", file=sys.stderr)
+            sys.exit(1)
+        ok = db.update_candidate_status(args.reject, "rejected")
+        if ok:
+            print(f"\n[REJECTED] Candidate ID {args.reject} ({cand['title'][:40]}) marked as REJECTED.\n")
+        else:
+            print(f"Failed to update candidate ID {args.reject}.", file=sys.stderr)
+        sys.exit(0)
+
+    # 3. Handle Summary
     if args.summary:
         summary = db.get_discovery_summary()
         print("\n==================================================")
@@ -134,6 +191,41 @@ def main() -> None:
         for s, count in summary["status_counts"].items():
             print(f"  - {s:22}: {count}")
         print("==================================================\n")
+        sys.exit(0)
+
+    # 4. Handle List Candidates
+    if args.list_candidates:
+        filter_status = None if args.status == "all" else args.status
+        discoveries = db.get_candidate_discoveries(
+            person_pid=args.pid,
+            status=filter_status,
+            min_confidence=args.min_score,
+            limit=args.person_limit * 5,
+        )
+        print("\n" + "=" * 115)
+        print(f" CANDIDATE DISCOVERIES (Status: {args.status.upper()}, Total: {len(discoveries)})")
+        print("=" * 115)
+        if not discoveries:
+            print("No candidate records found matching criteria.\n")
+            sys.exit(0)
+        headers = ["ID", "PID", "Ancestor Name", "Type", "Conf", "Status", "Title"]
+        widths = [5, 8, 20, 16, 6, 10, 40]
+        print(format_table_row(headers, widths))
+        print("-" * 115)
+        for cand in discoveries:
+            cols = [
+                str(cand["id"]),
+                cand["person_pid"],
+                (cand.get("person_name") or "Unknown")[:19],
+                cand["discovery_type"][:15],
+                f"{cand['confidence_score']:.0%}",
+                cand["status"].upper(),
+                cand["title"][:38],
+            ]
+            print(format_table_row(cols, widths))
+            print(f"     URL:   {cand['url']}")
+            print(f"     Match: {cand.get('relevance_reason')}")
+            print("-" * 115)
         sys.exit(0)
 
     # Initialize harvesters
