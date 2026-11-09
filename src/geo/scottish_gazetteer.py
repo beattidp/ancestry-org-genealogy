@@ -15,6 +15,15 @@ class ScottishParish:
     county: str
     alternate_names: list[str] = field(default_factory=list)
     opr_start_year: int = 1553
+    latitude: float | None = None
+    longitude: float | None = None
+
+    @property
+    def coordinates(self) -> tuple[float, float] | None:
+        """Returns (latitude, longitude) if available."""
+        if self.latitude is not None and self.longitude is not None:
+            return (self.latitude, self.longitude)
+        return None
 
     def generate_scotlandspeople_url(
         self, surname: str = "", forename: str = "", year: int | None = None
@@ -46,6 +55,8 @@ SCOTTISH_PARISH_DATA: list[dict[str, Any]] = [
         "county": "Midlothian",
         "alts": ["edinburgh", "st cuthberts", "st cuthbert", "west kirk"],
         "opr_start": 1573,
+        "lat": 55.9508,
+        "lon": -3.2053,
     },
     {
         "number": "685/2",
@@ -53,6 +64,8 @@ SCOTTISH_PARISH_DATA: list[dict[str, Any]] = [
         "county": "Midlothian",
         "alts": ["canongate", "edinburgh canongate"],
         "opr_start": 1564,
+        "lat": 55.9525,
+        "lon": -3.1786,
     },
     {
         "number": "685/3",
@@ -60,6 +73,8 @@ SCOTTISH_PARISH_DATA: list[dict[str, Any]] = [
         "county": "Midlothian",
         "alts": ["st giles", "high kirk", "edinburgh city"],
         "opr_start": 1595,
+        "lat": 55.9495,
+        "lon": -3.1908,
     },
     {
         "number": "693",
@@ -67,6 +82,8 @@ SCOTTISH_PARISH_DATA: list[dict[str, Any]] = [
         "county": "Midlothian",
         "alts": ["libberton", "liberton", "libberton midlothian"],
         "opr_start": 1629,
+        "lat": 55.9142,
+        "lon": -3.1611,
     },
     {
         "number": "692/1",
@@ -74,6 +91,8 @@ SCOTTISH_PARISH_DATA: list[dict[str, Any]] = [
         "county": "Midlothian",
         "alts": ["leith", "south leith", "port of leith"],
         "opr_start": 1597,
+        "lat": 55.9715,
+        "lon": -3.1718,
     },
     {
         "number": "683",
@@ -81,6 +100,8 @@ SCOTTISH_PARISH_DATA: list[dict[str, Any]] = [
         "county": "Midlothian",
         "alts": ["dalkeith"],
         "opr_start": 1603,
+        "lat": 55.8928,
+        "lon": -3.0706,
     },
     # Argyllshire
     {
@@ -89,6 +110,8 @@ SCOTTISH_PARISH_DATA: list[dict[str, Any]] = [
         "county": "Argyll",
         "alts": ["colonsay", "oronsay", "jura", "colonsay and oronsay", "isle of colonsay"],
         "opr_start": 1704,
+        "lat": 55.9961,
+        "lon": -5.9922,
     },
     {
         "number": "506",
@@ -96,6 +119,8 @@ SCOTTISH_PARISH_DATA: list[dict[str, Any]] = [
         "county": "Argyll",
         "alts": ["campbeltown", "kinloch", "kintyre"],
         "opr_start": 1659,
+        "lat": 55.4244,
+        "lon": -5.6061,
     },
     {
         "number": "512",
@@ -103,6 +128,8 @@ SCOTTISH_PARISH_DATA: list[dict[str, Any]] = [
         "county": "Argyll",
         "alts": ["inveraray", "inverary"],
         "opr_start": 1652,
+        "lat": 56.2307,
+        "lon": -5.0747,
     },
     {
         "number": "546",
@@ -110,6 +137,8 @@ SCOTTISH_PARISH_DATA: list[dict[str, Any]] = [
         "county": "Argyll",
         "alts": ["kilchoman", "islay"],
         "opr_start": 1720,
+        "lat": 55.7797,
+        "lon": -6.4406,
     },
     # Aberdeenshire
     {
@@ -118,6 +147,8 @@ SCOTTISH_PARISH_DATA: list[dict[str, Any]] = [
         "county": "Aberdeenshire",
         "alts": ["aberdeen", "st nicholas", "aberdeen city"],
         "opr_start": 1563,
+        "lat": 57.1475,
+        "lon": -2.0988,
     },
     {
         "number": "168/2",
@@ -125,6 +156,8 @@ SCOTTISH_PARISH_DATA: list[dict[str, Any]] = [
         "county": "Aberdeenshire",
         "alts": ["old machar", "machar", "old aberdeen"],
         "opr_start": 1641,
+        "lat": 57.1697,
+        "lon": -2.1031,
     },
     {
         "number": "232",
@@ -132,6 +165,8 @@ SCOTTISH_PARISH_DATA: list[dict[str, Any]] = [
         "county": "Aberdeenshire",
         "alts": ["peterhead"],
         "opr_start": 1668,
+        "lat": 57.5083,
+        "lon": -1.7833,
     },
     # Peeblesshire
     {
@@ -140,6 +175,8 @@ SCOTTISH_PARISH_DATA: list[dict[str, Any]] = [
         "county": "Peeblesshire",
         "alts": ["peebles", "peebleshire"],
         "opr_start": 1644,
+        "lat": 55.6533,
+        "lon": -3.1906,
     },
     {
         "number": "764",
@@ -147,6 +184,8 @@ SCOTTISH_PARISH_DATA: list[dict[str, Any]] = [
         "county": "Peeblesshire",
         "alts": ["innerleithen"],
         "opr_start": 1660,
+        "lat": 55.6186,
+        "lon": -3.0636,
     },
     # Lanarkshire / Glasgow
     {
@@ -155,6 +194,8 @@ SCOTTISH_PARISH_DATA: list[dict[str, Any]] = [
         "county": "Lanarkshire",
         "alts": ["glasgow", "glasgow city", "st mungo"],
         "opr_start": 1609,
+        "lat": 55.8625,
+        "lon": -4.2425,
     },
     {
         "number": "622",
@@ -162,6 +203,8 @@ SCOTTISH_PARISH_DATA: list[dict[str, Any]] = [
         "county": "Lanarkshire",
         "alts": ["barony", "barony parish"],
         "opr_start": 1702,
+        "lat": 55.8631,
+        "lon": -4.2344,
     },
     {
         "number": "647",
@@ -169,6 +212,8 @@ SCOTTISH_PARISH_DATA: list[dict[str, Any]] = [
         "county": "Lanarkshire",
         "alts": ["hamilton"],
         "opr_start": 1648,
+        "lat": 55.7772,
+        "lon": -4.0394,
     },
     {
         "number": "652",
@@ -176,6 +221,8 @@ SCOTTISH_PARISH_DATA: list[dict[str, Any]] = [
         "county": "Lanarkshire",
         "alts": ["lanark"],
         "opr_start": 1646,
+        "lat": 55.6738,
+        "lon": -3.7781,
     },
     # Ayrshire
     {
@@ -184,6 +231,8 @@ SCOTTISH_PARISH_DATA: list[dict[str, Any]] = [
         "county": "Ayrshire",
         "alts": ["ayr"],
         "opr_start": 1661,
+        "lat": 55.4627,
+        "lon": -4.6292,
     },
     {
         "number": "597",
@@ -191,6 +240,8 @@ SCOTTISH_PARISH_DATA: list[dict[str, Any]] = [
         "county": "Ayrshire",
         "alts": ["kilmarnock"],
         "opr_start": 1640,
+        "lat": 55.6111,
+        "lon": -4.4958,
     },
     {
         "number": "602",
@@ -198,6 +249,8 @@ SCOTTISH_PARISH_DATA: list[dict[str, Any]] = [
         "county": "Ayrshire",
         "alts": ["largs"],
         "opr_start": 1647,
+        "lat": 55.7958,
+        "lon": -4.8697,
     },
     # Dumfriesshire / Scottish Borders
     {
@@ -206,6 +259,8 @@ SCOTTISH_PARISH_DATA: list[dict[str, Any]] = [
         "county": "Dumfriesshire",
         "alts": ["dumfries"],
         "opr_start": 1605,
+        "lat": 55.0709,
+        "lon": -3.6053,
     },
     {
         "number": "812",
@@ -213,6 +268,8 @@ SCOTTISH_PARISH_DATA: list[dict[str, Any]] = [
         "county": "Dumfriesshire",
         "alts": ["annan"],
         "opr_start": 1703,
+        "lat": 54.9867,
+        "lon": -3.2592,
     },
     {
         "number": "834",
@@ -220,6 +277,8 @@ SCOTTISH_PARISH_DATA: list[dict[str, Any]] = [
         "county": "Dumfriesshire",
         "alts": ["lochmaben"],
         "opr_start": 1765,
+        "lat": 55.1294,
+        "lon": -3.4447,
     },
     # Clackmannanshire
     {
@@ -228,6 +287,8 @@ SCOTTISH_PARISH_DATA: list[dict[str, Any]] = [
         "county": "Clackmannanshire",
         "alts": ["alloa"],
         "opr_start": 1609,
+        "lat": 56.1165,
+        "lon": -3.7915,
     },
     # Renfrewshire
     {
@@ -236,6 +297,8 @@ SCOTTISH_PARISH_DATA: list[dict[str, Any]] = [
         "county": "Renfrewshire",
         "alts": ["greenock", "clyde", "port glasgow"],
         "opr_start": 1698,
+        "lat": 55.9567,
+        "lon": -4.7633,
     },
     {
         "number": "573",
@@ -243,6 +306,8 @@ SCOTTISH_PARISH_DATA: list[dict[str, Any]] = [
         "county": "Renfrewshire",
         "alts": ["paisley", "paisley abbey"],
         "opr_start": 1676,
+        "lat": 55.8456,
+        "lon": -4.4239,
     },
 ]
 
@@ -312,8 +377,17 @@ class ScottishGazetteer:
                     county=d["county"],
                     alternate_names=d["alts"],
                     opr_start_year=d["opr_start"],
+                    latitude=d.get("lat"),
+                    longitude=d.get("lon"),
                 )
             )
+
+    def get_parish_coordinates(self, parish_number: str) -> tuple[float, float] | None:
+        """Retrieves latitude and longitude centroid for a given parish number."""
+        for p in self.parishes:
+            if p.parish_number == parish_number:
+                return p.coordinates
+        return None
 
     @staticmethod
     def is_scottish_place(place_str: str | None) -> bool:

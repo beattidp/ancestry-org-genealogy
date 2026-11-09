@@ -23,10 +23,10 @@ class Settings(BaseSettings):
         description="Active FamilySearch fssessionid token from browser cookies.",
     )
 
-    familysearch_env: Literal["production", "beta"] = Field(
+    familysearch_env: Literal["production", "beta", "sandbox", "integration"] = Field(
         default="production",
         alias="FAMILYSEARCH_ENV",
-        description="API environment: 'production' (default) or 'beta'.",
+        description="API environment: 'production' (default) or 'beta' / 'sandbox'.",
     )
 
     familysearch_app_key: str = Field(
@@ -38,7 +38,7 @@ class Settings(BaseSettings):
     @property
     def base_url(self) -> str:
         """Returns the appropriate API base URL."""
-        if self.familysearch_env == "beta":
+        if self.familysearch_env.lower() in ("beta", "sandbox", "integration"):
             return "https://apibeta.familysearch.org"
         return "https://api.familysearch.org"
 

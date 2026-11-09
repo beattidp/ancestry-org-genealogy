@@ -67,3 +67,17 @@ def test_scotlandspeople_url_generation() -> None:
     assert "forename=William" in url
     assert "year_from=1600" in url
     assert "year_to=1610" in url
+
+
+def test_parish_coordinates() -> None:
+    gaz = ScottishGazetteer()
+    coords = gaz.get_parish_coordinates("693")
+    assert coords is not None
+    lat, lon = coords
+    assert abs(lat - 55.9142) < 0.001
+    assert abs(lon - (-3.1611)) < 0.001
+
+    parish, _ = gaz.resolve_place("Liberton, Midlothian, Scotland")
+    assert parish is not None
+    assert parish.coordinates == coords
+
