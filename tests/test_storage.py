@@ -94,3 +94,25 @@ def test_pedigree_gaps(temp_db):
     assert child_gap is not None
     assert "Mother" in child_gap["missing"]
     assert "Father" not in child_gap["missing"]
+
+
+def test_empty_template_schema_lifecycle(tmp_path: Path):
+    db_file = tmp_path / "data" / "pedigree.sqlite"
+
+    # Initially does not exist
+    assert not Database.is_empty_schema(db_file)
+
+    # Create empty schema template
+    Database.create_empty_template(db_file)
+    assert db_file.exists()
+    assert Database.is_empty_schema(db_file)
+
+    # Insert a record into persons -> no longer empty
+    db = Database(db_file)
+    db.upsert_person({"pid": "P999", "name": "Non Empty"})
+    assert not Database.is_empty_schema(db_file)
+
+    # Re-running create_empty_template resets it to clean empty schema
+    Database.create_empty_template(db_file)
+    assert Database.is_empty_schema(db_file)
+

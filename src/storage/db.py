@@ -34,8 +34,10 @@ class Database:
 
     def init_db(self) -> None:
         """Initializes database schema and indexes."""
-        with self.get_connection() as conn:
-            conn.executescript(
+        conn = self.get_connection()
+        try:
+            with conn:
+                conn.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS persons (
                     pid TEXT PRIMARY KEY,
@@ -188,6 +190,63 @@ class Database:
                 CREATE INDEX IF NOT EXISTS idx_candidates_conf ON candidate_discoveries(confidence_score);
                 """
             )
+        finally:
+            conn.close()
+
+    @staticmethod
+    def create_empty_template(db_path: str | Path) -> None:
+        """Initializes a schema-compatible SQLite database with zero rows and DELETE journal mode."""
+        p = Path(db_path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        if p.exists():
+            p.unlink()
+        db = Database(p)
+        import gc
+
+        gc.collect()
+        conn = sqlite3.connect(p, isolation_level=None)
+        conn.execute("PRAGMA journal_mode = DELETE;")
+        conn.execute("VACUUM;")
+        conn.close()
+
+    @staticmethod
+    def is_empty_schema(db_path: str | Path) -> bool:
+        """Validates that the database exists, contains all required schema tables, and has 0 rows."""
+        p = Path(db_path)
+        if not p.exists() or p.stat().st_size == 0:
+            return False
+        required_tables = {
+            "persons",
+            "relationships",
+            "pedigree_tree",
+            "facts",
+            "ingestion_runs",
+            "sources",
+            "person_sources",
+            "person_audit_scores",
+            "constraint_violations",
+            "candidate_discoveries",
+        }
+        try:
+            conn = sqlite3.connect(p)
+            tables = {
+                row[0]
+                for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';"
+                ).fetchall()
+            }
+            if not required_tables.issubset(tables):
+                conn.close()
+                return False
+            for t in required_tables:
+                count = conn.execute(f"SELECT COUNT(*) FROM {t};").fetchone()[0]
+                if count > 0:
+                    conn.close()
+                    return False
+            conn.close()
+            return True
+        except Exception:
+            return False
 
     # -------------------------------------------------------------------------
     # Ingestion & Upsert Operations

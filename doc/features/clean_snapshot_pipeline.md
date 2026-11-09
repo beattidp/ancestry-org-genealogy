@@ -52,6 +52,19 @@ Standard Git branching (e.g., branching `trunk` from `main` and committing file 
 * **`cis.user.SAMPLE-USER`**: Standard placeholder for account-level user tokens.
 * **`Sample User` / `Sample Ancestor`**: Standard placeholders for developer/user display names and ancestor leads.
 
+### 3. Schema Revision & Database Template (`data/pedigree.sqlite`)
+* **Empty Schema Template:** The destination repository tracks an empty `data/pedigree.sqlite` database containing the complete schema (10 tables, relational indexes, and constraint triggers) with 0 data rows.
+* **Destination `.gitignore` Rule:** In the public repository, `.gitignore` is dynamically modified during export to ignore runtime databases while tracking the schema template:
+  ```gitignore
+  *.sqlite
+  *.sqlite3
+  *.db
+  data/*
+  !data/pedigree.sqlite
+  cache/
+  ```
+* **Preservation & Idempotency:** The pipeline verifies the database via `Database.is_empty_schema()`. If `data/` or `data/pedigree.sqlite` does not exist, it is created automatically via `Database.create_empty_template()`. If an empty valid database already exists, it is preserved without altering git modification timestamps.
+
 ---
 
 ## Usage
@@ -84,8 +97,9 @@ git push -u origin trunk
 
 ## Verification & Metrics
 
-* **Source Test Suite:** 54 passing unit tests in private repository (`pytest`).
-* **Exported Test Suite:** 54 passing unit tests in destination repository (`pytest`).
+* **Source Test Suite:** 69 passing unit tests in private repository (`pytest`).
+* **Exported Test Suite:** 69 passing unit tests in destination repository (`pytest`).
 * **Forbidden Pattern Scan:** 0 matches in target repository across all files.
+* **Database Verification:** `data/pedigree.sqlite` present with 0 data rows and 10 schema tables.
 * **Branch Isolation:** Destination branch `trunk` has an independent, clean commit history.
 * **Indeterminate State Prevention:** Automatic rollback restores clean HEAD state on any abort.

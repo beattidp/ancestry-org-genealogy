@@ -17,5 +17,6 @@ htmlcov/
 *.sqlite
 *.sqlite3
 *.db
-data/
+data/*
+!data/pedigree.sqlite
 cache/
