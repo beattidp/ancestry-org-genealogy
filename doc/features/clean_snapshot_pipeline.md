@@ -38,8 +38,8 @@ Standard Git branching (e.g., branching `trunk` from `main` and committing file 
 
 ## Components
 
-### 1. Script Entrypoint (`scripts/export_clean.py`)
-* **Whitelist-based synchronization:** Only approved directories and files are copied (including all root CLI tools: `ingest.py`, `probe.py`, `validate_tree.py`, `tree_summary.py`, `audit_sources.py`, `export_gedcom.py`, `harvest_records.py`, `resolve_scottish_places.py`).
+### 1. Script Entrypoint (`util/export_clean.py`)
+* **Whitelist-based synchronization:** Only approved directories (`src/`, `tests/`, `scripts/`, `doc/features/`) and root configuration files (`README.md`, `requirements.txt`, `pytest.ini`, `.python-version`, `.env.example`, `.gitignore`) are copied. Internal utilities (`util/`) and private research materials (`doc/worklogs/`, `doc/plans/`, `doc/walkthroughs/`) are excluded.
 * **Pre-Checkout Branch Management:** Ensures target branch (`trunk`) is checked out before altering any working tree files.
 * **In-memory content transformation:** Performs regex substitution on all source code and markdown documents prior to writing.
 * **Security Guard (Step 4):** Scans destination files for forbidden user identifiers, surname patterns, and live PIDs.
@@ -71,19 +71,19 @@ Standard Git branching (e.g., branching `trunk` from `main` and committing file 
 
 ### Run Default Export
 ```bash
-python3 scripts/export_clean.py
+python3 util/export_clean.py
 ```
 
 ### Run with Custom Target Directory or Branch
 ```bash
-python3 scripts/export_clean.py \
+python3 util/export_clean.py \
   --target-dir ~/github/beattidp/ancestry-org-genealogy \
   --branch trunk
 ```
 
 ### Dry Run (Stage files without committing)
 ```bash
-python3 scripts/export_clean.py --no-commit
+python3 util/export_clean.py --no-commit
 ```
 
 ### Push to GitHub
