@@ -164,3 +164,9 @@ pytest -v
 ## License
 
 This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
+
+---
+
+### Credit where Credit is Due:
+The code for this application was developed with [Google Antigravity](http://antigravity.google/).  _Thank you!_
+
